@@ -49,7 +49,8 @@ fn handle(req: tiny_http::Request) {
     match path.as_str() {
         "/" => html(req, 200, render::home_page()),
         "/healthz" => text(req, 200, "ok"),
-        "/preferences" => html(req, 200, render::prefs_page()),
+        // settings live in a popup on home/results now
+        "/preferences" => { let _ = redirect(req, "/"); }
         "/search" => {
             let q = get("q").trim().to_string();
             if q.is_empty() {

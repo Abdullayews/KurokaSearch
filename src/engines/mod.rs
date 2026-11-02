@@ -17,6 +17,13 @@ pub mod github;
 pub mod arxiv;
 pub mod crossref;
 pub mod bing_site;
+pub mod knaben;
+pub mod solid;
+pub mod tdl;
+pub mod nyaa;
+pub mod libgen;
+pub mod annas;
+pub mod ahmia;
 
 use crate::engine::{SearchParams, SearchResult};
 
@@ -39,6 +46,13 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "crossref" => crossref::search(p),
         "bing_files" => bing_site::search_files(p),
         "bing_social" => bing_site::search_social(p),
+        "knaben" => knaben::search(p),
+        "solid" => solid::search(p),
+        "tdl" => tdl::search(p),
+        "nyaa" => nyaa::search(p),
+        "libgen" => libgen::search(p),
+        "annas" => annas::search(p),
+        "ahmia" => ahmia::search(p),
         other => Err(format!("unknown engine: {other}")),
     }
 }

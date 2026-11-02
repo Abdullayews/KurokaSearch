@@ -23,8 +23,9 @@ black-and-gold interface.
 | Music | Apple Music (iTunes), MusicBrainz |
 | IT | Stack Exchange, GitHub |
 | Science | arXiv, Crossref |
-| Files | PDF search |
+| Files | Anna's Archive, LibGen, Nyaa, Knaben, SolidTorrents, TorrentDownload, PDF search |
 | Social Media | site-scoped social search |
+| Onion | Ahmia (Tor hidden services) |
 
 ## Build & run
 
@@ -54,7 +55,7 @@ browser ──▶ kuroka-search (tiny_http workers)
 ```
 
 * Each engine runs in its own thread with its own timeout; slow or broken engines
-  simply drop out of the page and are reported in the **Info** panel.
+  simply drop out of the page and are reported in the **Extras → Engines on this search** panel.
 * Results are interleaved round-robin across engines so no single provider
   dominates the page, then de-duplicated by normalized URL.
 * The AI Report is generated **client-side**: your provider key lives in

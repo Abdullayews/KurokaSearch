@@ -74,7 +74,7 @@ pub fn host_of(url: &str) -> String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Category { All, Images, Videos, News, Maps, Music, It, Science, Files, Social }
+pub enum Category { All, Images, Videos, News, Maps, Music, It, Science, Files, Social, Onion }
 
 impl Category {
     pub fn from_str(s: &str) -> Category {
@@ -88,6 +88,7 @@ impl Category {
             "science" => Category::Science,
             "files" => Category::Files,
             "social" => Category::Social,
+            "onion" => Category::Onion,
             _ => Category::All,
         }
     }
@@ -95,13 +96,13 @@ impl Category {
         match self { Category::All => "all", Category::Images => "images", Category::Videos => "videos",
             Category::News => "news", Category::Maps => "maps", Category::Music => "music",
             Category::It => "it", Category::Science => "science", Category::Files => "files",
-            Category::Social => "social" }
+            Category::Social => "social", Category::Onion => "onion" }
     }
     pub fn label(&self) -> &'static str {
         match self { Category::All => "All", Category::Images => "Images", Category::Videos => "Videos",
             Category::News => "News", Category::Maps => "Maps", Category::Music => "Music",
             Category::It => "IT", Category::Science => "Science", Category::Files => "Files",
-            Category::Social => "Social Media" }
+            Category::Social => "Social Media", Category::Onion => "Onion" }
     }
 }
 
@@ -184,9 +185,17 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "arxiv", name: "arXiv", category: "science", default_on: true, paged: true },
     EngineInfo { id: "crossref", name: "Crossref", category: "science", default_on: true, paged: true },
     // files
-    EngineInfo { id: "bing_files", name: "Documents (PDF)", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "bing_files", name: "Documents (PDF)", category: "files", default_on: false, paged: true },
+    EngineInfo { id: "annas", name: "Anna's Archive", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "libgen", name: "LibGen", category: "files", default_on: true, paged: false },
+    EngineInfo { id: "nyaa", name: "Nyaa", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "knaben", name: "Knaben", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "solid", name: "SolidTorrents", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "tdl", name: "TorrentDownload", category: "files", default_on: true, paged: false },
     // social
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
+    // onion
+    EngineInfo { id: "ahmia", name: "Ahmia", category: "onion", default_on: true, paged: true },
 ];
 
 pub fn engines_for(params: &SearchParams) -> Vec<&'static EngineInfo> {
@@ -269,6 +278,13 @@ pub fn run_search(params: &SearchParams) -> SearchOutcome {
 
 fn normalize_url(u: &str) -> String {
     let s = u.trim().to_lowercase();
+    // magnets: dedupe by info-hash (tracker lists differ between engines)
+    if s.starts_with("magnet:") {
+        if let Some(pos) = s.find("urn:btih:") {
+            let hash: String = s[pos + 9..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+            if !hash.is_empty() { return format!("btih:{hash}"); }
+        }
+    }
     let s = s.split('?').next().unwrap_or(&s);
     let s = s.strip_suffix('/').unwrap_or(s);
     s.to_string()
@@ -433,7 +449,12 @@ pub fn bing_mkt(lang: &str) -> Option<&'static str> {
         "en" => Some("en-US"), "az" => Some("az-Latn-AZ"), "tr" => Some("tr-TR"),
         "ru" => Some("ru-RU"), "de" => Some("de-DE"), "fr" => Some("fr-FR"),
         "es" => Some("es-ES"), "ar" => Some("ar-SA"), "ja" => Some("ja-JP"),
-        "zh" => Some("zh-CN"),
+        "zh" => Some("zh-CN"), "it" => Some("it-IT"), "pt" => Some("pt-BR"),
+        "nl" => Some("nl-NL"), "pl" => Some("pl-PL"), "ko" => Some("ko-KR"),
+        "hi" => Some("hi-IN"), "id" => Some("id-ID"), "vi" => Some("vi-VN"),
+        "fa" => Some("fa-IR"), "uk" => Some("uk-UA"), "th" => Some("th-TH"),
+        "el" => Some("el-GR"), "he" => Some("he-IL"), "bn" => Some("bn-BD"),
+        "ro" => Some("ro-RO"),
         _ => None, // auto
     }
 }
@@ -441,7 +462,6 @@ pub fn bing_mkt(lang: &str) -> Option<&'static str> {
 /// Google News locale from language setting.
 pub fn gnews_locale(lang: &str) -> (&'static str, &'static str, &'static str) {
     match lang {
-        "en" => ("en-US", "US", "US:en"),
         "az" => ("az-AZ", "AZ", "AZ:az"),
         "tr" => ("tr-TR", "TR", "TR:tr"),
         "ru" => ("ru-RU", "RU", "RU:ru"),
@@ -451,6 +471,21 @@ pub fn gnews_locale(lang: &str) -> (&'static str, &'static str, &'static str) {
         "ar" => ("ar", "EG", "EG:ar"),
         "ja" => ("ja-JP", "JP", "JP:ja"),
         "zh" => ("zh-Hans", "CN", "CN:zh-Hans"),
+        "it" => ("it-IT", "IT", "IT:it"),
+        "pt" => ("pt-BR", "BR", "BR:pt"),
+        "nl" => ("nl-NL", "NL", "NL:nl"),
+        "pl" => ("pl-PL", "PL", "PL:pl"),
+        "ko" => ("ko-KR", "KR", "KR:ko"),
+        "hi" => ("hi-IN", "IN", "IN:hi"),
+        "id" => ("id-ID", "ID", "ID:id"),
+        "vi" => ("vi-VN", "VN", "VN:vi"),
+        "fa" => ("fa-IR", "IR", "IR:fa"),
+        "uk" => ("uk-UA", "UA", "UA:uk"),
+        "th" => ("th-TH", "TH", "TH:th"),
+        "el" => ("el-GR", "GR", "GR:el"),
+        "he" => ("he-IL", "IL", "IL:he"),
+        "bn" => ("bn-BD", "BD", "BD:bn"),
+        "ro" => ("ro-RO", "RO", "RO:ro"),
         _ => ("en-US", "US", "US:en"),
     }
 }

@@ -13,6 +13,7 @@
   var PREF_KEY = "kuroka.prefs";
   var DEFAULT_PREFS = {
     lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true,
+    theme: "dark", glow: true, engines: {},
     aiProv: "gemini", aiModel: "", aiKey: "", aiBase: ""
   };
 
@@ -31,6 +32,18 @@
   }
 
   var prefs = loadPrefs();
+
+  function applyTheme() {
+    document.body.classList.toggle("k-light", prefs.theme === "light");
+    document.body.classList.toggle("k-noglow", prefs.glow === false);
+  }
+  applyTheme();
+
+  /* engine ids saved for a category (or null = use defaults) */
+  function enginesFor(cat) {
+    var list = prefs.engines && prefs.engines[cat];
+    return Array.isArray(list) ? list : null;
+  }
 
   /* ------------------------------------------------------------------ *
    * toast
@@ -74,46 +87,82 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * search box: clear button + focus on results page
+   * search URL helpers — keep params, honor saved engine choices
    * ------------------------------------------------------------------ */
 
-  var qInput = $("#kQ"), clearBtn = $("#kClear");
-  function syncClear() {
-    if (!clearBtn || !qInput) return;
-    clearBtn.hidden = qInput.value.length === 0;
-  }
-  if (qInput && clearBtn) {
-    qInput.addEventListener("input", syncClear);
-    syncClear();
-    clearBtn.addEventListener("click", function () {
-      qInput.value = "";
-      syncClear();
-      qInput.focus();
-    });
-    if (document.body.classList.contains("k-page-results") && window.matchMedia("(min-width: 761px)").matches) {
-      var v = qInput.value.length;
-      qInput.focus();
-      qInput.setSelectionRange(v, v);
-    }
+  function searchUrl(over) {
+    var sp = new URLSearchParams(window.location.search);
+    var q = (over.q !== undefined) ? over.q : (sp.get("q") || "");
+    var url = "/search?q=" + encodeURIComponent(q);
+    var c = over.c !== undefined ? over.c : (sp.get("c") || "all");
+    var lang = over.lang !== undefined ? over.lang : (sp.get("lang") || prefs.lang || "auto");
+    var time = over.time !== undefined ? over.time : (sp.get("time") || "");
+    var ss = over.ss !== undefined ? String(over.ss) : (sp.get("ss") || "0");
+    var e = over.e !== undefined ? over.e : sp.get("e");
+    if (c && c !== "all") url += "&c=" + c;
+    if (lang && lang !== "auto") url += "&lang=" + lang;
+    if (time) url += "&time=" + time;
+    if (ss && ss !== "0") url += "&ss=" + ss;
+    if (over.page) url += "&page=" + over.page;
+    if (e) url += "&e=" + e;
+    if (over.size && over.size !== "any") url += "&size=" + over.size;
+    if (over.layout && over.layout !== "any") url += "&layout=" + over.layout;
+    return url;
   }
 
-  /* home form: carry preferences into the first search */
-  var homeForm = $(".k-srow-home");
-  if (homeForm) {
-    homeForm.addEventListener("submit", function () {
-      function addHidden(name, value) {
-        if (value === "" || value === "auto" || value === "0") return;
-        var i = document.createElement("input");
-        i.type = "hidden"; i.name = name; i.value = value;
-        homeForm.appendChild(i);
-      }
-      var c = homeForm.querySelector('input[name="c"]');
-      if (c && prefs.cat && prefs.cat !== "all") c.value = prefs.cat;
-      addHidden("lang", prefs.lang);
-      addHidden("time", prefs.time);
-      if (prefs.ss && prefs.ss !== "0") addHidden("ss", String(prefs.ss));
-    });
+  /* category tabs / pagination: attach saved engines for the target category */
+  document.addEventListener("click", function (ev) {
+    var a = ev.target.closest ? ev.target.closest("a[href^='/search']") : null;
+    if (!a) return;
+    var href = a.getAttribute("href") || "";
+    if (href.indexOf("e=") !== -1) return;
+    var m = href.match(/[?&]c=([a-z]+)/);
+    var cat = m ? m[1] : "all";
+    var ids = enginesFor(cat);
+    if (ids && ids.length) {
+      ev.preventDefault();
+      window.location.href = href + (href.indexOf("?") === -1 ? "?" : "&") + "e=" + ids.join(",");
+    }
+  });
+
+  /* ------------------------------------------------------------------ *
+   * search box
+   * ------------------------------------------------------------------ */
+
+  var qInput = $("#kQ");
+  if (qInput && document.body.classList.contains("k-page-results") &&
+      window.matchMedia("(min-width: 761px)").matches) {
+    var v = qInput.value.length;
+    qInput.focus();
+    qInput.setSelectionRange(v, v);
   }
+
+  /* home + results forms: carry preferences into the search.
+     (programmatic .submit() skips the submit event, so this is a plain
+     function called from both the listener and the autocomplete picker) */
+  function carryPrefs(form) {
+    var catIn = form.querySelector('input[name="c"]');
+    var cat = catIn ? catIn.value : "all";
+    if (catIn && prefs.cat && cat === "all" && prefs.cat !== "all") {
+      cat = prefs.cat;
+      catIn.value = prefs.cat;
+    }
+    function addHidden(name, value) {
+      if (value === "" || value === "auto" || value === "0") return;
+      var i = document.createElement("input");
+      i.type = "hidden"; i.name = name; i.value = value;
+      form.appendChild(i);
+    }
+    addHidden("lang", prefs.lang);
+    addHidden("time", prefs.time);
+    if (prefs.ss && prefs.ss !== "0") addHidden("ss", String(prefs.ss));
+    var ids = enginesFor(cat);
+    if (ids && ids.length) addHidden("e", ids.join(","));
+  }
+
+  $$("form.k-srow").forEach(function (form) {
+    form.addEventListener("submit", function () { carryPrefs(form); });
+  });
 
   /* open results in a new tab (preference) */
   if (prefs.newtab) {
@@ -124,7 +173,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * autocomplete (server-proxied — the provider never sees the user)
+   * autocomplete (server-proxied; overlay — never shifts the layout)
    * ------------------------------------------------------------------ */
 
   var acBox = $("#kAc");
@@ -141,14 +190,17 @@
       acItems = list; acSel = -1;
       if (!list.length) { acHide(); return; }
       acBox.innerHTML = "";
-      list.forEach(function (s, i) {
+      list.forEach(function (s) {
         var d = document.createElement("div");
         d.className = "k-ac-it";
         d.textContent = s;
         function apply() {
           qInput.value = s;
           acHide();
-          if (qInput.form) qInput.form.submit();
+          if (qInput.form) {
+            carryPrefs(qInput.form);
+            qInput.form.submit();
+          }
         }
         d.addEventListener("mousedown", function (ev) { ev.preventDefault(); apply(); });
         d.addEventListener("click", function (ev) { ev.preventDefault(); apply(); });
@@ -211,59 +263,243 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * results filters: selects navigate, buttons toggle panels
+   * custom dropdowns — styled menus, never the browser default
    * ------------------------------------------------------------------ */
 
-  function searchUrl(over) {
-    var sp = new URLSearchParams(window.location.search);
-    var q = sp.get("q") || "";
-    var url = "/search?q=" + encodeURIComponent(q);
-    var c = over.c !== undefined ? over.c : (sp.get("c") || "all");
-    var lang = over.lang !== undefined ? over.lang : (sp.get("lang") || prefs.lang || "auto");
-    var time = over.time !== undefined ? over.time : (sp.get("time") || "");
-    var ss = over.ss !== undefined ? String(over.ss) : (sp.get("ss") || "0");
-    if (c && c !== "all") url += "&c=" + c;
-    if (lang && lang !== "auto") url += "&lang=" + lang;
-    if (time) url += "&time=" + time;
-    if (ss && ss !== "0") url += "&ss=" + ss;
-    if (over.e) url += "&e=" + over.e;
-    if (over.size && over.size !== "any") url += "&size=" + over.size;
-    if (over.layout && over.layout !== "any") url += "&layout=" + over.layout;
-    return url;
+  function closeAllDds(except) {
+    $$(".k-dd.open").forEach(function (dd) {
+      if (dd === except) return;
+      dd.classList.remove("open");
+      var m = $(".k-dd-menu", dd);
+      if (m) m.hidden = true;
+      var b = $(".k-dd-btn", dd);
+      if (b) b.setAttribute("aria-expanded", "false");
+    });
   }
 
-  $$(".k-filters .k-sel").forEach(function (sel) {
-    sel.addEventListener("change", function () {
-      var over = {};
-      over[sel.name] = sel.value;
-      window.location.href = searchUrl(over);
-    });
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".k-dd-btn") : null;
+    if (btn) {
+      var dd = btn.closest(".k-dd");
+      var menu = $(".k-dd-menu", dd);
+      var willOpen = menu.hidden;
+      closeAllDds(dd);
+      menu.hidden = !willOpen;
+      dd.classList.toggle("open", willOpen);
+      btn.setAttribute("aria-expanded", String(willOpen));
+      ev.preventDefault();
+      return;
+    }
+    var opt = ev.target.closest ? ev.target.closest(".k-dd-opt") : null;
+    if (opt) {
+      var dd2 = opt.closest(".k-dd");
+      var val = opt.getAttribute("data-v") || "";
+      var lbl = opt.textContent;
+      var cur = $(".k-dd-cur", dd2);
+      if (cur) cur.textContent = lbl;
+      closeAllDds();
+      if (dd2.getAttribute("data-nav") === "1") {
+        var over = {};
+        over[dd2.getAttribute("data-k")] = val;
+        window.location.href = searchUrl(over);
+      }
+      ev.preventDefault();
+      return;
+    }
+    if (!ev.target.closest || !ev.target.closest(".k-dd")) closeAllDds();
   });
 
-  var extrasBtn = $("#kExtrasBtn"), extrasPanel = $("#kExtras"), infoBtn = $("#kInfoBtn"), infoPanel = $("#kInfoPanel");
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") {
+      closeAllDds();
+      var open = $(".k-dd.open .k-dd-btn");
+      if (open) open.focus();
+    }
+  });
 
-  function togglePanel(btn, panel) {
-    if (!btn || !panel) return;
-    btn.addEventListener("click", function () {
-      var open = !panel.hidden;
-      panel.hidden = open;
-      btn.setAttribute("aria-expanded", String(!open));
+  /* ------------------------------------------------------------------ *
+   * extras — one piece: image filters + engines + telemetry
+   * ------------------------------------------------------------------ */
+
+  var extrasBtn = $("#kExtrasBtn"), extrasPanel = $("#kExtras");
+  if (extrasBtn && extrasPanel) {
+    extrasBtn.addEventListener("click", function () {
+      var open = extrasPanel.hidden;
+      extrasPanel.hidden = !open;
+      extrasBtn.setAttribute("aria-expanded", String(open));
     });
   }
-  togglePanel(extrasBtn, extrasPanel);
-  togglePanel(infoBtn, infoPanel);
 
   var extrasApply = $("#kExtrasApply");
   if (extrasApply) {
     extrasApply.addEventListener("click", function () {
       var engines = $$('input[name="k-engine"]:checked').map(function (i) { return i.value; });
-      var size = $('.k-sel[name="x-size"]');
-      var layout = $('.k-sel[name="x-layout"]');
+      var sizeDd = $('#ddXSize');
+      var layoutDd = $('#ddXLayout');
+      var cur = function (dd) {
+        if (!dd) return "";
+        var c = $(".k-dd-cur", dd);
+        var m = c ? c.textContent : "";
+        var map = { "Any": "any", "Small": "small", "Medium": "medium", "Large": "large", "Wallpaper": "wallpaper",
+                    "Wide": "wide", "Tall": "tall", "Square": "square" };
+        return map[m] || "any";
+      };
       window.location.href = searchUrl({
         e: engines.join(","),
-        size: size ? size.value : "",
-        layout: layout ? layout.value : ""
+        size: cur(sizeDd),
+        layout: cur(layoutDd)
       });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * settings popup — blurred backdrop, animated, on any page
+   * ------------------------------------------------------------------ */
+
+  var setEl = $("#kSet");
+  function openSettings() {
+    if (!setEl) return;
+    fillSettings();
+    setEl.hidden = false;
+    requestAnimationFrame(function () {
+      setEl.classList.add("show");
+      document.body.classList.add("k-modal");
+    });
+    var x = $("#kSetX");
+    if (x) x.focus();
+  }
+  function closeSettings() {
+    if (!setEl) return;
+    setEl.classList.remove("show");
+    document.body.classList.remove("k-modal");
+    setTimeout(function () { setEl.hidden = true; }, 240);
+  }
+
+  var gear = $("#kGear");
+  if (gear) gear.addEventListener("click", openSettings);
+  var footSet = $("#kFootSet");
+  if (footSet) footSet.addEventListener("click", openSettings);
+  var aiOpenSet = $("#kAiOpenSet");
+  if (aiOpenSet) aiOpenSet.addEventListener("click", openSettings);
+  var setX = $("#kSetX");
+  if (setX) setX.addEventListener("click", closeSettings);
+  var setBg = $("#kSetBg");
+  if (setBg) setBg.addEventListener("click", closeSettings);
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && setEl && !setEl.hidden) closeSettings();
+  });
+
+  /* tabs */
+  $$(".k-set-nav button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      $$(".k-set-nav button").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      var t = b.getAttribute("data-t");
+      $$(".k-set-pane").forEach(function (p) {
+        p.classList.toggle("on", p.getAttribute("data-pane") === t);
+      });
+    });
+  });
+
+  function setDdCur(id, val) {
+    var dd = $("#" + id);
+    if (!dd) return;
+    var cur = $(".k-dd-cur", dd);
+    var opt = $(".k-dd-opt[data-v='" + val + "']", dd);
+    if (cur && opt) cur.textContent = opt.textContent;
+  }
+
+  function fillSettings() {
+    setDdCur("s-dd-lang", prefs.lang);
+    setDdCur("s-dd-cat", prefs.cat);
+    setDdCur("s-dd-time", prefs.time || "");
+    setDdCur("s-dd-ss", String(prefs.ss));
+    setDdCur("s-dd-theme", prefs.theme);
+    setDdCur("s-dd-prov", prefs.aiProv);
+    var m = $("#s-ai-model"); if (m) m.value = prefs.aiModel || "";
+    var k = $("#s-ai-key"); if (k) k.value = prefs.aiKey || "";
+    var b = $("#s-ai-base"); if (b) b.value = prefs.aiBase || "";
+    var ac = $("#s-ac"); if (ac) ac.checked = prefs.ac !== false;
+    var nt = $("#s-newtab"); if (nt) nt.checked = !!prefs.newtab;
+    var gl = $("#s-glow"); if (gl) gl.checked = prefs.glow !== false;
+    /* engine toggles */
+    $$("input[data-eng]").forEach(function (i) {
+      var cat = i.getAttribute("data-cat");
+      var ids = enginesFor(cat);
+      if (ids) i.checked = ids.indexOf(i.getAttribute("data-eng")) !== -1;
+      else i.checked = i.hasAttribute("checked");
+    });
+  }
+
+  var setSave = $("#kSetSave");
+  if (setSave) {
+    setSave.addEventListener("click", function () {
+      var langDd = $("#s-dd-lang");
+      function ddVal(id) {
+        var dd = $("#" + id);
+        if (!dd) return "";
+        var opt = $(".k-dd-opt.on", dd);
+        return opt ? (opt.getAttribute("data-v") || "") : "";
+      }
+      /* remember .on for chosen options */
+      function ddValByCur(id) {
+        var dd = $("#" + id);
+        if (!dd) return "";
+        var cur = $(".k-dd-cur", dd);
+        var chosen = null;
+        $$(".k-dd-opt", dd).forEach(function (o) {
+          if (cur && o.textContent === cur.textContent) chosen = o.getAttribute("data-v");
+        });
+        return chosen || "";
+      }
+      var engines = {};
+      $$("input[data-eng]").forEach(function (i) {
+        var cat = i.getAttribute("data-cat");
+        if (!engines[cat]) engines[cat] = [];
+        if (i.checked) engines[cat].push(i.getAttribute("data-eng"));
+      });
+      Object.keys(engines).forEach(function (cat) {
+        if (engines[cat].length === 0) delete engines[cat];
+      });
+      prefs = {
+        lang: ddValByCur("s-dd-lang") || "auto",
+        time: ddValByCur("s-dd-time") || "",
+        ss: ddValByCur("s-dd-ss") || "0",
+        cat: ddValByCur("s-dd-cat") || "all",
+        newtab: !!($("#s-newtab") || {}).checked,
+        ac: ($("#s-ac") || {}).checked !== false,
+        theme: ddValByCur("s-dd-theme") || "dark",
+        glow: ($("#s-glow") || {}).checked !== false,
+        engines: engines,
+        aiProv: ddValByCur("s-dd-prov") || "gemini",
+        aiModel: ($("#s-ai-model") || {}).value || "",
+        aiKey: ($("#s-ai-key") || {}).value || "",
+        aiBase: ($("#s-ai-base") || {}).value || ""
+      };
+      savePrefs(prefs);
+      applyTheme();
+      closeSettings();
+      toast("Settings saved — stored only in this browser");
+    });
+  }
+
+  var setReset = $("#kSetReset");
+  if (setReset) {
+    setReset.addEventListener("click", function () {
+      prefs = JSON.parse(JSON.stringify(DEFAULT_PREFS));
+      savePrefs(prefs);
+      applyTheme();
+      fillSettings();
+      toast("Settings reset to defaults");
+    });
+  }
+
+  var wipe = $("#s-wipe");
+  if (wipe) {
+    wipe.addEventListener("click", function () {
+      try { localStorage.removeItem(PREF_KEY); } catch (e) {}
+      toast("Local data cleared");
+      setTimeout(function () { window.location.reload(); }, 700);
     });
   }
 
@@ -348,14 +584,13 @@
     }
 
     aiGo.addEventListener("click", function () {
-      if (!prefs.aiKey && !(prefs.aiProv === "gemini" && prefs.aiKey === "")) {
-        if (!prefs.aiKey) {
-          toast("Add your API key in Preferences \u2192 AI Report");
-          return;
-        }
+      if (!prefs.aiKey) {
+        toast("Add your API key in Settings → AI Report");
+        openSettings();
+        return;
       }
       var model = prefs.aiModel || prov.model;
-      if (!model) { toast("Set a model name in Preferences"); return; }
+      if (!model) { toast("Set a model name in Settings"); openSettings(); return; }
       var base = prefs.aiBase || prov.base;
       if (prefs.aiProv !== "gemini" && !base) { toast("Set a Base URL for the custom provider"); return; }
 
@@ -424,63 +659,6 @@
           done(text);
         }).catch(function (e) { fail(e.message || "network"); });
       }
-    });
-  }
-
-  /* ------------------------------------------------------------------ *
-   * preferences page
-   * ------------------------------------------------------------------ */
-
-  var saveBtn = $("#p-save");
-  if (saveBtn) {
-    var LANGS = [["auto", "Auto-detect"], ["en", "English"], ["az", "Az\u0259rbaycanca"], ["tr", "T\u00fcrk\u00e7e"],
-      ["ru", "\u0420\u0443\u0441\u0441\u043a\u0438\u0439"], ["de", "Deutsch"], ["fr", "Fran\u00e7ais"], ["es", "Espa\u00f1ol"],
-      ["ar", "\u0627\u0644\u0639\u0631\u0628\u064a\u0629"], ["ja", "\u65e5\u672c\u8a9e"], ["zh", "\u4e2d\u6587"]];
-    var TIMES = [["", "Anytime"], ["d", "Past 24 hours"], ["w", "Past week"], ["m", "Past month"], ["y", "Past year"]];
-    var SS = [["0", "Off"], ["1", "Moderate"], ["2", "Strict"]];
-    var CATS = [["all", "All"], ["images", "Images"], ["videos", "Videos"], ["news", "News"], ["maps", "Maps"],
-      ["music", "Music"], ["it", "IT"], ["science", "Science"], ["files", "Files"], ["social", "Social Media"]];
-    var PROVS = [["gemini", "Google Gemini"], ["openai", "OpenAI"], ["groq", "Groq"],
-      ["openrouter", "OpenRouter"], ["custom", "Custom (OpenAI-compatible)"]];
-
-    function fill(id, options, value) {
-      var sel = $("#" + id);
-      if (!sel) return;
-      sel.innerHTML = "";
-      options.forEach(function (o) {
-        var op = document.createElement("option");
-        op.value = o[0]; op.textContent = o[1];
-        if (o[0] === value) op.selected = true;
-        sel.appendChild(op);
-      });
-    }
-
-    fill("p-lang", LANGS, prefs.lang);
-    fill("p-time", TIMES, prefs.time);
-    fill("p-ss", SS, String(prefs.ss));
-    fill("p-cat", CATS, prefs.cat);
-    fill("p-ai-prov", PROVS, prefs.aiProv);
-    var pm = $("#p-ai-model"); if (pm) pm.value = prefs.aiModel || "";
-    var pk = $("#p-ai-key"); if (pk) pk.value = prefs.aiKey || "";
-    var pb = $("#p-ai-base"); if (pb) pb.value = prefs.aiBase || "";
-    var pn = $("#p-newtab"); if (pn) pn.checked = !!prefs.newtab;
-    var pa = $("#p-ac"); if (pa) pa.checked = prefs.ac !== false;
-
-    saveBtn.addEventListener("click", function () {
-      prefs = {
-        lang: ($("#p-lang") || {}).value || "auto",
-        time: ($("#p-time") || {}).value || "",
-        ss: ($("#p-ss") || {}).value || "0",
-        cat: ($("#p-cat") || {}).value || "all",
-        newtab: !!($("#p-newtab") || {}).checked,
-        ac: ($("#p-ac") || {}).checked !== false,
-        aiProv: ($("#p-ai-prov") || {}).value || "gemini",
-        aiModel: ($("#p-ai-model") || {}).value || "",
-        aiKey: ($("#p-ai-key") || {}).value || "",
-        aiBase: ($("#p-ai-base") || {}).value || ""
-      };
-      savePrefs(prefs);
-      toast("Preferences saved \u2014 stored only in this browser");
     });
   }
 })();

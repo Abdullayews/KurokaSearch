@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Server-side HTML rendering: home, results, preferences, error pages.
+//! Server-side HTML rendering: home, results, error pages + settings popup.
 //! 100% original markup — no template engine, no upstream code.
 
 use crate::engine::*;
@@ -34,13 +34,23 @@ fn gear_svg(size: u32) -> String {
 }
 
 fn chevron_svg() -> &'static str {
-    r#"<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 14.5 12 8.5l6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+    r#"<svg class="k-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 9l7 7 7-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
 }
 
+fn close_svg() -> &'static str {
+    r#"<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>"#
+}
+
+/// Languages: Auto first, then A–Z by English name.
 const LANGS: &[(&str, &str)] = &[
-    ("auto", "Auto-detect"), ("en", "English"), ("az", "Azərbaycanca"), ("tr", "Türkçe"),
-    ("ru", "Русский"), ("de", "Deutsch"), ("fr", "Français"), ("es", "Español"),
-    ("ar", "العربية"), ("ja", "日本語"), ("zh", "中文"),
+    ("auto", "Auto-detect"),
+    ("ar", "العربية"), ("az", "Azərbaycanca"), ("bn", "বাংলা"), ("zh", "中文"),
+    ("nl", "Nederlands"), ("en", "English"), ("fa", "فارسی"), ("fr", "Français"),
+    ("de", "Deutsch"), ("el", "Ελληνικά"), ("he", "עברית"), ("hi", "हिन्दी"),
+    ("id", "Bahasa Indonesia"), ("it", "Italiano"), ("ja", "日本語"), ("ko", "한국어"),
+    ("pl", "Polski"), ("pt", "Português"), ("ro", "Română"), ("ru", "Русский"),
+    ("es", "Español"), ("th", "ไทย"), ("tr", "Türkçe"), ("uk", "Українська"),
+    ("vi", "Tiếng Việt"),
 ];
 
 const TIMES: &[(&str, &str)] = &[
@@ -48,21 +58,35 @@ const TIMES: &[(&str, &str)] = &[
     ("m", "Past month"), ("y", "Past year"),
 ];
 
-const SS: &[(&str, &str)] = &[("0", "SafeSearch: Off"), ("1", "SafeSearch: Moderate"), ("2", "SafeSearch: Strict")];
+const SS: &[(&str, &str)] = &[
+    ("0", "SafeSearch: Off"), ("1", "SafeSearch: Moderate"), ("2", "SafeSearch: Strict"),
+];
 
 const CATS: &[(&str, &str)] = &[
     ("all", "All"), ("images", "Images"), ("videos", "Videos"), ("news", "News"),
     ("maps", "Maps"), ("music", "Music"), ("it", "IT"), ("science", "Science"),
-    ("files", "Files"), ("social", "Social Media"),
+    ("files", "Files"), ("social", "Social Media"), ("onion", "Onion"),
 ];
 
-fn sel(name: &str, options: &[(&str, &str)], current: &str, cls: &str) -> String {
-    let mut o = format!(r#"<select name="{name}" class="{cls}" aria-label="{name}">"#);
+fn label_of<'a>(options: &'a [(&'a str, &'a str)], value: &str) -> &'a str {
+    options.iter().find(|(v, _)| *v == value).map(|(_, l)| *l).unwrap_or(options.first().map(|(_, l)| *l).unwrap_or(""))
+}
+
+/// Custom dropdown — never the browser default look.
+/// `nav`: selecting an option reloads the search with that parameter.
+fn dd(id: &str, key: &str, options: &[(&str, &str)], current: &str, nav: bool) -> String {
+    let mut o = format!(
+        r#"<div class="k-dd" id="{id}" data-k="{key}"{}>"#,
+        if nav { r#" data-nav="1""# } else { "" });
+    o.push_str(&format!(
+        r#"<button type="button" class="k-dd-btn" aria-haspopup="listbox" aria-expanded="false"><span class="k-dd-cur">{}</span>{}</button>"#,
+        esc(label_of(options, current)), chevron_svg()));
+    o.push_str(r#"<div class="k-dd-menu" role="listbox" hidden>"#);
     for (v, l) in options {
-        let sel = if *v == current { " selected" } else { "" };
-        o.push_str(&format!(r#"<option value="{v}"{sel}>{}</option>"#, esc(l)));
+        let on = if *v == current { " on" } else { "" };
+        o.push_str(&format!(r#"<div class="k-dd-opt{on}" role="option" data-v="{v}">{}</div>"#, esc(l)));
     }
-    o.push_str("</select>");
+    o.push_str("</div></div>");
     o
 }
 
@@ -118,16 +142,21 @@ fn layout_open(title: &str, desc: &str, body_class: &str) -> String {
     esc(title), esc(desc), esc(title), esc(desc), favicon_links(), body_class)
 }
 
-fn layout_close() -> &'static str {
-    r#"<button id="kTop" class="k-top" type="button" aria-label="Back to top">CHEV</button>
+fn layout_close() -> String {
+    format!(r#"<button id="kTop" class="k-top" type="button" aria-label="Back to top">{}</button>
 <div id="kToast" class="k-toast" role="status" hidden></div>
+{}
 <script src="/static/js/kuroka.js" defer></script>
 </body>
-</html>"#
+</html>"#, chevron_up_svg(), settings_modal())
+}
+
+fn chevron_up_svg() -> &'static str {
+    r#"<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 14.5 12 8.5l6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
 }
 
 // ---------------------------------------------------------------------------
-// search bar (shared by home and results header)
+// search bar — clean input, gear outside on the right, overlay suggestions
 // ---------------------------------------------------------------------------
 
 struct BarCtx<'a> {
@@ -137,7 +166,7 @@ struct BarCtx<'a> {
 }
 
 fn search_bar(c: &BarCtx) -> String {
-    let mut o = String::new();
+    let mut o = String::from(r#"<div class="k-sbar">"#);
     if c.home {
         o.push_str(r#"<form class="k-srow k-srow-home" action="/search" method="get" role="search">"#);
         o.push_str(r#"<input type="hidden" name="c" value="all">"#);
@@ -145,18 +174,17 @@ fn search_bar(c: &BarCtx) -> String {
         o.push_str(r#"<form class="k-srow" id="kForm" action="/search" method="get" role="search">"#);
         o.push_str(&format!(r#"<input type="hidden" name="c" value="{}">"#, esc(c.cat)));
     }
-    o.push_str(r#"<span class="k-chip"><img src="/static/brand/logomark-48.png" alt="" width="22" height="22"></span>"#);
     o.push_str(&format!(
         r#"<input class="k-in" id="kQ" name="q" value="{}" autocomplete="off" spellcheck="false" placeholder="Search for..." aria-label="Search query">"#,
         esc(c.q)));
-    o.push_str(r#"<button type="button" class="k-clear" id="kClear" hidden aria-label="Clear query">&times;</button>"#);
-    o.push_str(r#"<button class="k-go" type="submit">Search</button>"#);
-    if c.home {
-        // settings button sits right of the search bar — gear rotation on hover
-        o.push_str(r#"<a class="k-gear" href="/preferences" aria-label="Preferences" title="Preferences">GEAR</a>"#);
-    }
     o.push_str("</form>");
+    // gear sits OUTSIDE the bar, right side, same line — opens the settings popup
+    o.push_str(&format!(
+        r#"<button type="button" class="k-gear" id="kGear" aria-label="Settings" title="Settings">{}</button>"#,
+        gear_svg(22)));
+    // suggestions overlay on top of whatever is below — nothing ever shifts
     o.push_str(r#"<div class="k-ac" id="kAc" hidden></div>"#);
+    o.push_str("</div>");
     o
 }
 
@@ -169,7 +197,13 @@ pub fn home_page() -> String {
         "KurokaSearch — a privacy-first metasearch engine. No tracking, no logs, no ads.", "k-page-home");
     o.push_str(r#"<main class="k-home">
   <div class="k-home-center">
-    <img class="k-mascot" src="/static/brand/mascot.png" alt="Kuroka, the cat-eared mascot of KurokaSearch" width="340" height="340">
+    <div class="k-mascot-wrap" aria-hidden="true">
+      <div class="k-mascot-glow"></div>
+      <div class="k-mascot-spark k-sp1"></div>
+      <div class="k-mascot-spark k-sp2"></div>
+      <div class="k-mascot-spark k-sp3"></div>
+      <img class="k-mascot" src="/static/brand/mascot.png" alt="" width="340" height="340">
+    </div>
     <div class="k-wordmark" aria-hidden="true">Kuroka</div>
 "#);
     let bar = search_bar(&BarCtx { q: "", cat: "all", home: true });
@@ -178,12 +212,12 @@ pub fn home_page() -> String {
     o.push_str(r#"</div>
   <footer class="k-foot">
     <span class="k-foot-brand">KurokaSearch</span>
-    <span class="k-foot-note">no tracking · no logs · no ads — queries are proxied, never stored</span>
-    <span class="k-foot-links"><a href="/preferences">Preferences</a><a href="https://github.com/Abdullayews/KurokaSearch" rel="noopener">GitHub</a></span>
+    <span class="k-foot-note">no tracking · no logs · no ads</span>
+    <span class="k-foot-links"><button type="button" class="k-linklike" id="kFootSet">Settings</button><a href="https://github.com/Abdullayews/KurokaSearch" rel="noopener">GitHub</a></span>
   </footer>
 </main>
 "#);
-    o.push_str(&layout_close().replace("CHEV", chevron_svg()).replace("GEAR", &gear_svg(22)));
+    o.push_str(&layout_close());
     o
 }
 
@@ -196,34 +230,37 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
     let title = if p.query.is_empty() { "Kuroka".to_string() } else { format!("{} — Kuroka", p.query) };
     let mut o = layout_open(&title, &format!("Search results for {}", p.query), "k-page-results");
 
-    // ---- sticky header ----
-    o.push_str(r#"<header class="k-hdr" id="kHdr">
-  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/logomark-48.png" alt="" width="28" height="28"><span>Kuroka</span></a>
-  <a class="k-gearc" href="/preferences" aria-label="Preferences" title="Preferences">GEARC</a>
+    // ---- sticky header: banner brand left, core center ----
+    o.push_str(&format!(r#"<header class="k-hdr" id="kHdr">
+  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/banner-head.png" alt="Kuroka" width="168" height="40"></a>
   <div class="k-hdr-core">
-"#);
+"#));
+
     let bar = search_bar(&BarCtx { q: &p.query, cat, home: false });
     o.push_str(&bar);
     o.push_str(&cat_tabs(&p.query, cat, &p.language, &p.time, p.safesearch));
 
-    // filters row (language / time / safesearch / extras / info)
+    // filters row: custom dropdowns (never the browser default) + unified extras
     o.push_str(r#"<div class="k-filters">"#);
-    o.push_str(&sel("lang", LANGS, &p.language, "k-sel k-sel-auto"));
-    o.push_str(&sel("time", TIMES, &p.time, "k-sel"));
-    o.push_str(&sel("ss", SS, &p.safesearch.to_string(), "k-sel"));
-    o.push_str(r#"<button type="button" class="k-fbtn" id="kExtrasBtn" aria-expanded="false">Extras<em>CHEVSM</em></button>"#);
-    o.push_str(r#"<button type="button" class="k-fbtn k-info-btn" id="kInfoBtn" aria-expanded="false">Info</button>"#);
+    o.push_str(&dd("ddLang", "lang", LANGS, &p.language, true));
+    o.push_str(&dd("ddTime", "time", TIMES, &p.time, true));
+    o.push_str(&dd("ddSs", "ss", SS, &p.safesearch.to_string(), true));
+    o.push_str(&format!(
+        r#"<button type="button" class="k-fbtn" id="kExtrasBtn" aria-expanded="false" aria-controls="kExtras"><span>Extras</span>{}</button>"#,
+        chevron_svg()));
     o.push_str("</div>");
 
-    // extras panel — engine toggles (+ image filters)
+    // ---- extras: one piece — image filters, engine toggles, engine stats ----
     o.push_str(r#"<div class="k-extras" id="kExtras" hidden>"#);
     if cat == "images" {
+        o.push_str(r#"<div class="k-x-sec k-x-row">"#);
         o.push_str(&format!(r#"<label class="k-x-l">Size {}</label>"#,
-            sel("x-size", &[("any","Any"),("small","Small"),("medium","Medium"),("large","Large"),("wallpaper","Wallpaper")], &p.size, "k-sel k-sel-x")));
+            dd("ddXSize", "size", &[("any","Any"),("small","Small"),("medium","Medium"),("large","Large"),("wallpaper","Wallpaper")], &p.size, true)));
         o.push_str(&format!(r#"<label class="k-x-l">Layout {}</label>"#,
-            sel("x-layout", &[("any","Any"),("wide","Wide"),("tall","Tall"),("square","Square")], &p.layout, "k-sel k-sel-x")));
+            dd("ddXLayout", "layout", &[("any","Any"),("wide","Wide"),("tall","Tall"),("square","Square")], &p.layout, true)));
+        o.push_str("</div>");
     }
-    o.push_str(r#"<div class="k-x-engines">"#);
+    o.push_str(r#"<div class="k-x-sec"><div class="k-x-h">Engines</div><div class="k-x-engines">"#);
     let active: Vec<&str> = if p.engines.is_empty() {
         REGISTRY.iter().filter(|e| e.category == cat && e.default_on).map(|e| e.id).collect()
     } else {
@@ -236,9 +273,10 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
             e.id, e.name));
     }
     o.push_str(r#"</div><button type="button" class="k-fbtn k-x-apply" id="kExtrasApply">Apply</button></div>"#);
-
-    // info panel — response times & engine telemetry (server-rendered)
-    o.push_str(&info_panel(out));
+    // engine telemetry lives inside extras — everything extra opens from one place
+    o.push_str(&format!(r#"<div class="k-x-sec k-x-stats"><div class="k-x-h">Engines on this search</div>{}</div>"#,
+        info_table(out)));
+    o.push_str("</div>");
 
     o.push_str("</div></header>\n");
 
@@ -262,11 +300,11 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
         o.push_str(&pagination(out, p));
     }
     o.push_str("</main>\n");
-    o.push_str(&layout_close().replace("CHEV", chevron_svg()).replace("GEARC", &gear_svg(22)));
+    o.push_str(&layout_close());
     o
 }
 
-fn info_panel(out: &SearchOutcome) -> String {
+fn info_table(out: &SearchOutcome) -> String {
     let total: usize = out.engines.iter().map(|e| e.count).sum();
     let ok = out.engines.iter().filter(|e| e.ok).count();
     let mut rows = String::new();
@@ -277,10 +315,9 @@ fn info_panel(out: &SearchOutcome) -> String {
             r#"<tr><td>{}</td><td>{}</td><td>{} ms</td><td><span class="k-inf-dot k-inf-{}"></span>{}</td></tr>"#,
             esc(&e.name), e.count, e.time_ms, status, err));
     }
-    format!(r#"<div class="k-info-panel" id="kInfoPanel" hidden>
-  <div class="k-inf-sum">{ok} of {} engines replied in {} ms · {} results</div>
-  <table class="k-inf-tbl"><thead><tr><th>engine</th><th>results</th><th>time</th><th>status</th></tr></thead><tbody>{rows}</tbody></table>
-</div>"#, out.engines.len(), out.total_ms, total)
+    format!(r#"<div class="k-inf-sum">{ok} of {} engines replied in {} ms · {} results</div>
+<table class="k-inf-tbl"><thead><tr><th>engine</th><th>results</th><th>time</th><th>status</th></tr></thead><tbody>{rows}</tbody></table>"#,
+        out.engines.len(), out.total_ms, total)
 }
 
 fn ai_card(q: &str, out: &SearchOutcome) -> String {
@@ -294,7 +331,7 @@ fn ai_card(q: &str, out: &SearchOutcome) -> String {
   <img class="k-ai-ava" src="/static/brand/ai-avatar.png" alt="" width="44" height="44">
   <div class="k-ai-body">
     <div class="k-ai-head">AI Report <span class="k-ai-prov" id="kAiProv">Google Gemini</span></div>
-    <div class="k-ai-note">Summarizes the results below. Add your own API key in <a href="/preferences">Preferences</a> — keys stay in your browser.</div>
+    <div class="k-ai-note">Summarizes these results. Add your API key in <button type="button" class="k-linklike" id="kAiOpenSet">Settings</button> — the key stays in this browser.</div>
     <div class="k-ai-out" id="kAiOut" hidden></div>
     <button class="k-ai-go" id="kAiGo" type="button" data-q="{}" data-ctx="{}">Generate</button>
   </div>
@@ -320,6 +357,11 @@ fn web_list(rs: &[SearchResult]) -> String {
     let mut o = String::from(r#"<div class="k-rs">"#);
     for r in rs {
         let av = avatar(&r.source);
+        let magnet = if r.url.starts_with("magnet:") {
+            r#"<span class="k-r-mag" title="magnet link">magnet</span>"#
+        } else {
+            ""
+        };
         let mut meta = String::new();
         if let Some(d) = &r.published {
             if !d.is_empty() {
@@ -329,12 +371,14 @@ fn web_list(rs: &[SearchResult]) -> String {
         for (k, v) in &r.meta {
             if k == "engine" {
                 meta.push_str(&format!(r#"<span class="k-r-eng">{}</span>"#, esc(v)));
+            } else if k == "page" {
+                meta.push_str(&format!(r#"<a class="k-r-eng" href="{}" rel="noopener noreferrer" target="_blank">details</a>"#, esc(v)));
             } else {
                 meta.push_str(&format!(r#"<span class="k-r-kv"><b>{}</b> {}</span>"#, esc(k), esc(v)));
             }
         }
         o.push_str(&format!(r#"<article class="k-r">
-  <div class="k-r-head">{av}<a class="k-r-url" href="{url}" rel="noopener noreferrer">{src}</a></div>
+  <div class="k-r-head">{av}<a class="k-r-url" href="{url}" rel="noopener noreferrer">{src}</a>{magnet}</div>
   <a class="k-r-title" href="{url}" rel="noopener noreferrer">{title}</a>
   <p class="k-r-desc">{desc}</p>
   <div class="k-r-meta">{meta}</div>
@@ -470,43 +514,91 @@ fn pagination(out: &SearchOutcome, p: &SearchParams) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// preferences
+// settings popup (modal, blurred backdrop, animated — rendered on every page)
 // ---------------------------------------------------------------------------
 
-pub fn prefs_page() -> String {
-    let mut o = layout_open("Preferences — Kuroka", "KurokaSearch preferences", "k-page-prefs");
-    o.push_str(r#"<header class="k-hdr k-hdr-prefs">
-  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/logomark-48.png" alt="" width="28" height="28"><span>Kuroka</span></a>
-</header>
-<main class="k-prefs">
-  <h1>Preferences</h1>
-  <p class="k-prefs-sub">Settings live in <strong>your browser</strong> (localStorage). Nothing is sent to or stored on the server.</p>
-
-  <section class="k-p-sec">
-    <h2>Search</h2>
-    <div class="k-p-row"><label for="p-lang">Language</label><select id="p-lang" class="k-sel"></select></div>
-    <div class="k-p-row"><label for="p-time">Time range</label><select id="p-time" class="k-sel"></select></div>
-    <div class="k-p-row"><label for="p-ss">SafeSearch</label><select id="p-ss" class="k-sel"></select></div>
-    <div class="k-p-row"><label for="p-cat">Default category</label><select id="p-cat" class="k-sel"></select></div>
-    <div class="k-p-row"><label for="p-newtab">Open results in new tab</label><input type="checkbox" id="p-newtab" class="k-p-check"></div>
-    <div class="k-p-row"><label for="p-ac">Autocomplete</label><input type="checkbox" id="p-ac" class="p-check k-p-check" checked></div>
-  </section>
-
-  <section class="k-p-sec" id="ai">
-    <h2>AI Report <span class="k-p-note">bring your own key — it never leaves your browser</span></h2>
-    <div class="k-p-row"><label for="p-ai-prov">Provider</label><select id="p-ai-prov" class="k-sel"></select></div>
-    <div class="k-p-row"><label for="p-ai-model">Model</label><input type="text" id="p-ai-model" class="k-p-in" placeholder="gemini-flash-lite-latest" autocomplete="off"></div>
-    <div class="k-p-row"><label for="p-ai-key">API key</label><input type="password" id="p-ai-key" class="k-p-in" placeholder="paste key — stored locally" autocomplete="off"></div>
-    <div class="k-p-row"><label for="p-ai-base">Base URL <span class="k-p-note">(custom providers)</span></label><input type="text" id="p-ai-base" class="k-p-in" placeholder="https://…/v1" autocomplete="off"></div>
-  </section>
-
-  <div class="k-p-actions">
-    <button class="k-ai-go" id="p-save" type="button">Save preferences</button>
-    <a class="k-pg-btn" href="/">Back to search</a>
+fn settings_modal() -> String {
+    let mut o = String::from(r#"<div class="k-set" id="kSet" hidden>
+  <div class="k-set-bg" id="kSetBg"></div>
+  <div class="k-set-win" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="k-set-head">
+      <span class="k-set-title">Settings</span>
+      <button type="button" class="k-set-x" id="kSetX" aria-label="Close">"#);
+    o.push_str(close_svg());
+    o.push_str(r#"</button>
+    </div>
+    <div class="k-set-body">
+      <nav class="k-set-nav" aria-label="Settings sections">
+        <button type="button" class="on" data-t="search">Search</button>
+        <button type="button" data-t="appearance">Appearance</button>
+        <button type="button" data-t="ai">AI Report</button>
+        <button type="button" data-t="engines">Engines</button>
+        <button type="button" data-t="privacy">Privacy</button>
+      </nav>
+      <div class="k-set-panes">
+        <section class="k-set-pane on" data-pane="search">
+          <div class="k-p-row"><label for="s-lang">Language</label>"#);
+    o.push_str(&dd("s-dd-lang", "lang", LANGS, "auto", false));
+    o.push_str(r#"</div>
+          <div class="k-p-row"><label for="s-cat">Default category</label>"#);
+    o.push_str(&dd("s-dd-cat", "cat", CATS, "all", false));
+    o.push_str(r#"</div>
+          <div class="k-p-row"><label for="s-time">Time range</label>"#);
+    o.push_str(&dd("s-dd-time", "time", TIMES, "", false));
+    o.push_str(r#"</div>
+          <div class="k-p-row"><label for="s-ss">SafeSearch</label>"#);
+    o.push_str(&dd("s-dd-ss", "ss", &[("0","Off"),("1","Moderate"),("2","Strict")], "0", false));
+    o.push_str(r#"</div>
+          <div class="k-p-row"><label for="s-ac">Autocomplete</label><label class="k-switch"><input type="checkbox" id="s-ac"><span class="k-sl"></span></label></div>
+          <div class="k-p-row"><label for="s-newtab">Open results in new tab</label><label class="k-switch"><input type="checkbox" id="s-newtab"><span class="k-sl"></span></label></div>
+        </section>
+        <section class="k-set-pane" data-pane="appearance">
+          <div class="k-p-row"><label for="s-theme">Theme</label>"#);
+    o.push_str(&dd("s-dd-theme", "theme", &[("dark","Dark"),("light","Light")], "dark", false));
+    o.push_str(r#"</div>
+          <div class="k-p-row"><label for="s-glow">Backdrop glow</label><label class="k-switch"><input type="checkbox" id="s-glow" checked><span class="k-sl"></span></label></div>
+          <p class="k-set-note">On Zen Internet the page background turns transparent automatically when a wallpaper filter is active.</p>
+        </section>
+        <section class="k-set-pane" data-pane="ai">
+          <div class="k-p-row"><label for="s-ai-prov">Provider</label>"#);
+    o.push_str(&dd("s-dd-prov", "aiProv", &[
+        ("gemini","Google Gemini"),("openai","OpenAI"),("groq","Groq"),
+        ("openrouter","OpenRouter"),("custom","Custom (OpenAI-compatible)")], "gemini", false));
+    o.push_str(r#"</div>
+          <div class="k-p-row"><label for="s-ai-model">Model</label><input type="text" id="s-ai-model" class="k-p-in" placeholder="gemini-flash-lite-latest" autocomplete="off"></div>
+          <div class="k-p-row"><label for="s-ai-key">API key</label><input type="password" id="s-ai-key" class="k-p-in" placeholder="paste key — stored locally" autocomplete="off"></div>
+          <div class="k-p-row"><label for="s-ai-base">Base URL <span class="k-p-note">(custom providers)</span></label><input type="text" id="s-ai-base" class="k-p-in" placeholder="https://…/v1" autocomplete="off"></div>
+          <p class="k-set-note">Bring your own key — requests go from this browser straight to the provider.</p>
+        </section>
+        <section class="k-set-pane" data-pane="engines">"#);
+    // per-category engine toggles
+    for (cid, clabel) in CATS {
+        let engines: Vec<&EngineInfo> = REGISTRY.iter().filter(|e| e.category == *cid).collect();
+        if engines.is_empty() { continue; }
+        o.push_str(&format!(r#"<div class="k-eng-cat"><div class="k-x-h">{clabel}</div><div class="k-x-engines">"#));
+        for e in engines {
+            let on = if e.default_on { " checked" } else { "" };
+            o.push_str(&format!(
+                r#"<label class="k-x-e"><input type="checkbox" data-eng="{eid}" data-cat="{cid}"{on}>{}</label>"#,
+                e.name, eid = e.id));
+        }
+        o.push_str("</div></div>");
+    }
+    o.push_str(r#"<p class="k-set-note">Chosen engines apply to every new search in that category.</p>
+        </section>
+        <section class="k-set-pane" data-pane="privacy">
+          <p class="k-set-p">Queries are proxied through this server and never logged. No cookies, no fingerprinting, no ad networks.</p>
+          <p class="k-set-p">Settings and AI keys live in this browser's localStorage only — clear them any time:</p>
+          <button type="button" class="k-pg-btn" id="s-wipe">Clear local data</button>
+        </section>
+      </div>
+    </div>
+    <div class="k-set-foot">
+      <button type="button" class="k-pg-btn" id="kSetReset">Reset</button>
+      <button type="button" class="k-ai-go" id="kSetSave">Save</button>
+    </div>
   </div>
-</main>
-"#);
-    o.push_str(&layout_close().replace("CHEV", chevron_svg()));
+</div>"#);
     o
 }
 
@@ -523,6 +615,6 @@ pub fn error_page(code: u16, msg: &str) -> String {
   <a class="k-pg-btn" href="/">Back to Kuroka</a>
 </main>
 "#, esc(msg)));
-    o.push_str(&layout_close().replace("CHEV", chevron_svg()));
+    o.push_str(&layout_close());
     o
 }
