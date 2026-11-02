@@ -1,0 +1,16 @@
+{
+  "name": "KurokaSearch",
+  "short_name": "Kuroka",
+  "description": "KurokaSearch — a privacy-first metasearch engine. No tracking, no logs, no ads.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "icons": [
+    { "src": "/static/brand/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/static/brand/logomark-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/brand/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/brand/logomark.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
