@@ -30,6 +30,9 @@ pub mod news_extra;
 pub mod it_extra;
 pub mod science_extra;
 pub mod misc_extra;
+pub mod ddg_media;
+pub mod reddit;
+pub mod deezer;
 
 use crate::engine::{SearchParams, SearchResult};
 
@@ -81,6 +84,11 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "audius" => misc_extra::audius_search(p),
         "lemmy" => misc_extra::lemmy_search(p),
         "photon" => misc_extra::photon_search(p),
+        // --- task 21 additions ---
+        "ddg_images" => ddg_media::ddg_images(p),
+        "ddg_videos" => ddg_media::ddg_videos(p),
+        "reddit" => reddit::search(p),
+        "deezer" => deezer::search(p),
         other => Err(format!("unknown engine: {other}")),
     }
 }

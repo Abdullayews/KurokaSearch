@@ -26,7 +26,10 @@ pub fn esc(s: &str) -> String {
 fn avatar(host: &str) -> String {
     let hue = avatar_hue(host);
     let letter = host.chars().next().map(|c| c.to_ascii_uppercase()).unwrap_or('?');
-    format!(r#"<span class="k-ava" style="--h:{hue}" aria-hidden="true">{}</span>"#, esc(&letter.to_string()))
+    // real favicon from the server-side proxy sits ON TOP of the letter;
+    // if it cannot load the letter avatar underneath stays visible
+    format!(r#"<span class="k-ava" style="--h:{hue}" aria-hidden="true"><img src="/favicon?d={}" alt="" loading="lazy" onerror="this.remove()">{}</span>"#,
+        esc(host), esc(&letter.to_string()))
 }
 
 fn gear_svg(size: u32) -> String {
@@ -210,7 +213,6 @@ pub fn home_page() -> String {
 "#);
     let bar = search_bar(&BarCtx { q: "", cat: "all", home: true });
     o.push_str(&bar);
-    o.push_str(&cat_tabs("", "all", "auto", "", 0));
     o.push_str("</div>\n</main>\n");
     o.push_str(&layout_close());
     o
@@ -247,16 +249,17 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
 
     o.push_str("</div></header>\n");
 
-    // ---- body grid: AI report owns a fixed left column (~1/4) on the All
-    // tab; results take the rest; extras sit BESIDE them when open ----
+    // ---- body: results run the full width in ONE column; Extras sits BESIDE
+    // them when open. The AI report is a full-width horizontal band in the
+    // gap between the filter buttons and the first link (All tab only). ----
     let more = {
         let engines = engines_for(p);
         (engines.iter().all(|e| e.paged) && out.results.len() >= 4 && p.page < 50) as u8
     };
-    o.push_str(&format!(r#"<div class="k-body">"#));
     if p.category == Category::All {
-        o.push_str(&format!(r#"<aside class="k-ai-col" id="kAiCol">{}</aside>"#, ai_card(&p.query, out)));
+        o.push_str(&format!(r#"<div class="k-ai-band">{}</div>"#, ai_card(&p.query, out)));
     }
+    o.push_str(r#"<div class="k-body">"#);
     o.push_str(&format!(r#"<main class="k-main" id="kMain" data-cat="{cat}" data-q="{}" data-page="{}" data-more="{more}">"#, esc(&p.query), p.page));
 
     if out.results.is_empty() {

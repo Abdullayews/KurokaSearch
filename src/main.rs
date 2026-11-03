@@ -76,7 +76,8 @@ fn handle(req: tiny_http::Request) {
             let q = get("q");
             let list = autocomplete(&q);
             let body = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
-            json(req, 200, body)
+            // API responses are the only cacheable things — short and shared
+            let _ = respond(req, 200, json_ct(), body.into_bytes(), Some("public, max-age=300"));
         }
         "/img" => {
             let u = get("u");
@@ -86,10 +87,23 @@ fn handle(req: tiny_http::Request) {
                 match fetch_image_cached(&u) {
                     Ok((ctype, bytes)) => {
                         let _ = respond(req, 200, Header::from_bytes(&b"Content-Type"[..], ctype.as_bytes()).unwrap(),
-                            bytes, Some("no-store, max-age=0"));
+                            bytes, Some("public, max-age=86400"));
                     }
                     Err(e) => text(req, 502, &engine::clip(&e, 120)),
                 }
+            }
+        }
+        "/favicon" => {
+            let d = get("d");
+            match favicon_host(&d) {
+                None => text(req, 400, "bad host"),
+                Some(host) => match fetch_favicon_cached(&host) {
+                    Ok((ctype, bytes)) => {
+                        let _ = respond(req, 200, Header::from_bytes(&b"Content-Type"[..], ctype.as_bytes()).unwrap(),
+                            bytes, Some("public, max-age=604800"));
+                    }
+                    Err(_) => text(req, 404, "no icon"),
+                },
             }
         }
         p if p.starts_with("/static/") => serve_static(req, p),
@@ -135,9 +149,8 @@ fn text(req: tiny_http::Request, code: u16, body: &str) {
     let _ = respond(req, code, ct, body.as_bytes().to_vec(), None);
 }
 
-fn json(req: tiny_http::Request, code: u16, body: String) {
-    let ct = Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..]).unwrap();
-    let _ = respond(req, code, ct, body.into_bytes(), None);
+fn json_ct() -> Header {
+    Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..]).unwrap()
 }
 
 /// Decode a percent-encoded path (no '+' handling).
@@ -341,6 +354,57 @@ fn is_proxyable_url(u: &str) -> bool {
         && !host.starts_with("172.17.") && !host.starts_with("172.18.")
         && !host.starts_with("172.19.") && !host.starts_with("172.2")
         && !host.starts_with("172.30.") && !host.starts_with("172.31.")
+}
+
+// ---------------------------------------------------------------------------
+// favicon proxy — real icons for result rows, served cacheable, with a
+// letter-avatar fallback painted by the markup when an icon is missing
+// ---------------------------------------------------------------------------
+
+/// Validate the `d` parameter into a plain public hostname.
+fn favicon_host(d: &str) -> Option<String> {
+    let host = d.trim().to_ascii_lowercase();
+    let host = host.split('/').next().unwrap_or("");
+    let host = host.split(':').next().unwrap_or("");
+    let host = host.trim_start_matches("www.").to_string();
+    if host.len() < 4 || host.len() > 100 { return None; }
+    if !host.contains('.') { return None; }
+    if !host.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' )) { return None; }
+    if matches!(host.as_str(), "localhost" | "0.0.0.0" | "ip6-localhost")
+        || host.starts_with("127.") || host.starts_with("10.")
+        || host.starts_with("192.168.") || host.starts_with("169.254.")
+        || host.starts_with("172.16.") || host.ends_with(".local")
+    {
+        return None;
+    }
+    Some(host)
+}
+
+/// Fetch `host`'s icon through DuckDuckGo's icon service, with a small
+/// disk cache (same store as the image proxy) so bursts stay friendly.
+fn fetch_favicon_cached(host: &str) -> Result<(String, Vec<u8>), String> {
+    let dir = cache_dir();
+    let key = format!("fav-{:016x}", hash64(host));
+    let body_p = dir.join(format!("{key}.body"));
+    let meta_p = dir.join(format!("{key}.meta"));
+    if let (Ok(meta), Ok(body)) = (std::fs::read_to_string(&meta_p), std::fs::read(&body_p)) {
+        if meta.starts_with("image/") && !body.is_empty() {
+            return Ok((meta, body));
+        }
+    }
+    let url = format!("https://icons.duckduckgo.com/ip3/{host}.ico");
+    let fetched = with_img_permit(|| {
+        engine::http_get_binary(&url, engine::USER_AGENT,
+            &[("Accept", "image/png,image/webp,image/*,*/*;q=0.8")], Duration::from_secs(8))
+    });
+    let (ctype, bytes) = fetched?;
+    if !ctype.starts_with("image/") || bytes.is_empty() {
+        return Err(format!("not an image ({ctype})"));
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&meta_p, &ctype);
+    let _ = std::fs::write(&body_p, &bytes);
+    Ok((ctype, bytes))
 }
 
 // ---------------------------------------------------------------------------

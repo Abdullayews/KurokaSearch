@@ -63,6 +63,106 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * particles — every action sparks: clicks, taps, key presses, scroll.
+   * Mouse movement is deliberately excluded. Respects reduced motion.
+   * ------------------------------------------------------------------ */
+
+  (function () {
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      var cv = document.createElement("canvas");
+      cv.id = "kFx";
+      cv.setAttribute("aria-hidden", "true");
+      document.body.appendChild(cv);
+      var ctx = cv.getContext("2d");
+      if (!ctx) return;
+      var W = 0, H = 0;
+      var DPR = Math.min(window.devicePixelRatio || 1, 2);
+      function resize() {
+        W = window.innerWidth; H = window.innerHeight;
+        cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      }
+      resize();
+      window.addEventListener("resize", resize);
+
+      var parts = [];
+      var COLORS = ["#e6b445", "#f0c65e", "#d29a2f", "#fff3d6"];
+
+      function spawn(x, y, n, spread, lift) {
+        for (var i = 0; i < n; i++) {
+          var a = Math.random() * Math.PI * 2;
+          var v = Math.random() * spread + 0.35;
+          parts.push({
+            x: x, y: y,
+            vx: Math.cos(a) * v,
+            vy: Math.sin(a) * v - (lift || 0),
+            r: Math.random() * 2.1 + 0.7,
+            c: COLORS[(Math.random() * COLORS.length) | 0],
+            life: 1,
+            decay: 0.016 + Math.random() * 0.026
+          });
+        }
+        if (parts.length > 350) parts.splice(0, parts.length - 350);
+      }
+
+      var raf = 0;
+      function tick() {
+        raf = 0;
+        ctx.clearRect(0, 0, W, H);
+        for (var i = parts.length - 1; i >= 0; i--) {
+          var p = parts[i];
+          p.x += p.vx; p.y += p.vy;
+          p.vy += 0.05; p.vx *= 0.985; p.vy *= 0.985;
+          p.life -= p.decay;
+          if (p.life <= 0) { parts.splice(i, 1); continue; }
+          ctx.globalAlpha = p.life > 0 ? p.life : 0;
+          ctx.fillStyle = p.c;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r * (0.45 + p.life * 0.55), 0, 6.28318);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        if (parts.length) raf = requestAnimationFrame(tick);
+        else ctx.clearRect(0, 0, W, H);
+      }
+      function wake() { if (!raf) raf = requestAnimationFrame(tick); }
+
+      /* click / tap — burst right under the pointer */
+      document.addEventListener("click", function (ev) {
+        spawn(ev.clientX, ev.clientY, 12, 2.3, 0.5);
+        wake();
+      }, { passive: true });
+      document.addEventListener("touchstart", function (ev) {
+        var t = ev.touches && ev.touches[0];
+        if (t) { spawn(t.clientX, t.clientY, 10, 2.1, 0.4); wake(); }
+      }, { passive: true });
+
+      /* key presses — small sparks along the focused element's edge */
+      document.addEventListener("keydown", function (ev) {
+        if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+        var el = ev.target;
+        var r = (el && el.getBoundingClientRect) ? el.getBoundingClientRect() : null;
+        var x, y;
+        if (r && r.width > 2) { x = r.left + Math.random() * r.width; y = r.bottom - 2; }
+        else { x = W / 2 + (Math.random() - 0.5) * 240; y = H * 0.55; }
+        spawn(x, y, 3, 1.1, 1.7);
+        wake();
+      }, { passive: true });
+
+      /* scrolling — occasional embers rising from the bottom edge */
+      var lastSpark = 0;
+      window.addEventListener("scroll", function () {
+        var now = Date.now();
+        if (now - lastSpark < 150) return;
+        lastSpark = now;
+        spawn(Math.random() * W, H - 6, 2, 0.7, 1.9);
+        wake();
+      }, { passive: true });
+    } catch (e) { /* particles are decorative — never break the page */ }
+  })();
+
+  /* ------------------------------------------------------------------ *
    * scroll: collapse header, show back-to-top
    * ------------------------------------------------------------------ */
 

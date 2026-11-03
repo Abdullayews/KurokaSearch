@@ -29,7 +29,7 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         let link = tag_text(item, "link").unwrap_or_default();
         let pubdate = tag_text(item, "pubDate").unwrap_or_default();
         let source = decode_entities(&tag_text(item, "source").unwrap_or_default());
-        let desc = strip_tags(&tag_text(item, "description").unwrap_or_default());
+        let desc = clean_text(&tag_text(item, "description").unwrap_or_default());
         if title.is_empty() || link.is_empty() { continue; }
         let epoch = parse_rfc2822(&pubdate);
         if !time_accepts(&p.time, epoch) { continue; }
