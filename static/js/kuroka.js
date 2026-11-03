@@ -12,7 +12,7 @@
 
   var PREF_KEY = "kuroka.prefs";
   var DEFAULT_PREFS = {
-    lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true, inf: false,
+    lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true,
     theme: "dark", glow: true, engines: {},
     aiProv: "gemini", aiModel: "", aiKey: "", aiBase: ""
   };
@@ -87,20 +87,19 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * infinite scroll — fetch the next page and append its results
+   * infinite scroll — ALWAYS ON: fetch the next page and append results
    * ------------------------------------------------------------------ */
 
   (function () {
     var main = $("#kMain");
-    if (!main || !prefs.inf) return;
+    if (!main) return;
     var busy = false, done = false;
+    var page = parseInt(main.getAttribute("data-page") || "1", 10) || 1;
+    var more = main.getAttribute("data-more") === "1";
 
     function nextLink() {
-      var links = $$(".k-pg a", main);
-      for (var i = 0; i < links.length; i++) {
-        if (links[i].textContent.trim() === "Next") return links[i].getAttribute("href");
-      }
-      return null;
+      if (!more || page >= 50) return null;
+      return searchUrl({ page: page + 1 });
     }
 
     function sentinel() {
@@ -123,18 +122,13 @@
         .then(function (html) {
           var doc = new DOMParser().parseFromString(html, "text/html");
           var nm = doc.getElementById("kMain");
-          if (!nm) { done = true; return; }
-          var pgOld = $(".k-pg", main);
+          if (!nm || $(".k-nors", nm)) { done = true; return; }
           var add = [];
-          for (var i = 0; i < nm.children.length; i++) {
-            var el = nm.children[i];
-            if (el.classList.contains("k-pg")) continue;
-            if (el.id === "kAi") continue; /* one AI card is enough */
-            add.push(el);
-          }
+          for (var i = 0; i < nm.children.length; i++) add.push(nm.children[i]);
+          if (!add.length) { done = true; return; }
           add.forEach(function (el) { main.insertBefore(el, sent); });
-          var pgNew = $(".k-pg", nm);
-          if (pgOld && pgNew) pgOld.parentNode.replaceChild(pgNew, pgOld);
+          page = parseInt(nm.getAttribute("data-page") || "1", 10) || (page + 1);
+          more = nm.getAttribute("data-more") === "1";
           if (!nextLink()) { done = true; io.disconnect(); }
           busy = false;
           hookDeadImages(add);
@@ -447,8 +441,6 @@
 
   var gear = $("#kGear");
   if (gear) gear.addEventListener("click", openSettings);
-  var footSet = $("#kFootSet");
-  if (footSet) footSet.addEventListener("click", openSettings);
   var aiOpenSet = $("#kAiOpenSet");
   if (aiOpenSet) aiOpenSet.addEventListener("click", openSettings);
   var setX = $("#kSetX");
@@ -490,7 +482,6 @@
     var k = $("#s-ai-key"); if (k) k.value = prefs.aiKey || "";
     var b = $("#s-ai-base"); if (b) b.value = prefs.aiBase || "";
     var ac = $("#s-ac"); if (ac) ac.checked = prefs.ac !== false;
-    var inf = $("#s-inf"); if (inf) inf.checked = !!prefs.inf;
     var nt = $("#s-newtab"); if (nt) nt.checked = !!prefs.newtab;
     var gl = $("#s-glow"); if (gl) gl.checked = prefs.glow !== false;
     /* engine toggles */
@@ -539,7 +530,6 @@
         cat: ddValByCur("s-dd-cat") || "all",
         newtab: !!($("#s-newtab") || {}).checked,
         ac: ($("#s-ac") || {}).checked !== false,
-        inf: !!($("#s-inf") || {}).checked,
         theme: ddValByCur("s-dd-theme") || "dark",
         glow: ($("#s-glow") || {}).checked !== false,
         engines: engines,

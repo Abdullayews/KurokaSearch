@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "kuroka-search"
-version = "3.2.1"
+version = "3.3.0"
 dependencies = [
  "reqwest",
  "serde",

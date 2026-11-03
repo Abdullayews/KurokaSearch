@@ -386,10 +386,59 @@ pub fn strip_tags(html: &str) -> String {
 }
 
 pub fn decode_entities(s: &str) -> String {
-    s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-        .replace("&quot;", "\"").replace("&#x27;", "'").replace("&#39;", "'")
-        .replace("&nbsp;", " ").replace("&mdash;", "—").replace("&ndash;", "–")
-        .replace("&hellip;", "…").replace("&laquo;", "«").replace("&raquo;", "»")
+    // decode to a fixpoint: upstream HTML is sometimes double-encoded
+    // (&amp;#039; -> &#039; -> '), so a single pass leaves literal entities
+    let mut cur = s.to_string();
+    for _ in 0..3 {
+        let next = decode_entities_once(&cur);
+        if next == cur { break; }
+        cur = next;
+    }
+    cur
+}
+
+/// One decoding pass — named entities plus ALL numeric forms
+/// (decimal with or without leading zeros, and hex `&#x27;`).
+fn decode_entities_once(s: &str) -> String {
+    let named: &[(&str, &str)] = &[
+        ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""),
+        ("&nbsp;", " "), ("&mdash;", "—"), ("&ndash;", "–"), ("&hellip;", "…"),
+        ("&laquo;", "«"), ("&raquo;", "»"), ("&middot;", "·"), ("&rsquo;", "'"),
+        ("&lsquo;", "'"), ("&rdquo;", "\""), ("&ldquo;", "\""), ("&apos;", "'"),
+    ];
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let window = &tail[..tail.len().min(10)];
+        let mut matched = false;
+        if let Some(semi) = window.find(';') {
+            let ent = &tail[..=semi];
+            if let Some((_, rep)) = named.iter().find(|(n, _)| *n == ent) {
+                out.push_str(rep);
+                rest = &tail[ent.len()..];
+                matched = true;
+            } else if let Some(num) = ent.strip_prefix("&#").and_then(|e| e.strip_suffix(';')) {
+                let v = if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
+                    u32::from_str_radix(hex, 16).ok()
+                } else {
+                    num.parse::<u32>().ok() // "039" == 39 — leading zeros are legal
+                };
+                if let Some(c) = v.and_then(char::from_u32) {
+                    out.push(c);
+                    rest = &tail[ent.len()..];
+                    matched = true;
+                }
+            }
+        }
+        if !matched {
+            out.push('&');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 pub fn clip(s: &str, max: usize) -> String {

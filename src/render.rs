@@ -211,14 +211,7 @@ pub fn home_page() -> String {
     let bar = search_bar(&BarCtx { q: "", cat: "all", home: true });
     o.push_str(&bar);
     o.push_str(&cat_tabs("", "all", "auto", "", 0));
-    o.push_str(r#"</div>
-  <footer class="k-foot">
-    <span class="k-foot-brand">KurokaSearch</span>
-    <span class="k-foot-note">no tracking · no logs · no ads</span>
-    <span class="k-foot-links"><button type="button" class="k-linklike" id="kFootSet">Settings</button><a href="https://github.com/Abdullayews/KurokaSearch" rel="noopener">GitHub</a></span>
-  </footer>
-</main>
-"#);
+    o.push_str("</div>\n</main>\n");
     o.push_str(&layout_close());
     o
 }
@@ -234,7 +227,7 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
 
     // ---- sticky header: banner brand left, core center ----
     o.push_str(&format!(r#"<header class="k-hdr" id="kHdr">
-  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/banner-head.png" alt="Kuroka" width="172" height="40"></a>
+  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/banner-head.png" alt="Kuroka" width="544" height="132"></a>
   <div class="k-hdr-core">
 "#));
 
@@ -254,12 +247,17 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
 
     o.push_str("</div></header>\n");
 
-    // ---- body grid: results full-width + extras beside them when open ----
-    o.push_str(&format!(r#"<div class="k-body"><main class="k-main" id="kMain" data-cat="{cat}" data-q="{}">"#, esc(&p.query)));
-
+    // ---- body grid: AI report owns a fixed left column (~1/4) on the All
+    // tab; results take the rest; extras sit BESIDE them when open ----
+    let more = {
+        let engines = engines_for(p);
+        (engines.iter().all(|e| e.paged) && out.results.len() >= 4 && p.page < 50) as u8
+    };
+    o.push_str(&format!(r#"<div class="k-body">"#));
     if p.category == Category::All {
-        o.push_str(&ai_card(&p.query, out));
+        o.push_str(&format!(r#"<aside class="k-ai-col" id="kAiCol">{}</aside>"#, ai_card(&p.query, out)));
     }
+    o.push_str(&format!(r#"<main class="k-main" id="kMain" data-cat="{cat}" data-q="{}" data-page="{}" data-more="{more}">"#, esc(&p.query), p.page));
 
     if out.results.is_empty() {
         o.push_str(&no_results(p));
@@ -271,7 +269,6 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
             Category::Maps => o.push_str(&map_grid(&out.results)),
             _ => o.push_str(&web_list(&out.results)),
         }
-        o.push_str(&pagination(out, p));
     }
     o.push_str("</main>\n");
 
@@ -315,14 +312,20 @@ fn info_table(out: &SearchOutcome) -> String {
     let mut rows = String::new();
     for e in &out.engines {
         let status = if e.ok { "ok" } else { "err" };
+        let time = if e.time_ms >= 1000 {
+            format!("{:.1} s", e.time_ms as f64 / 1000.0)
+        } else {
+            format!("{} ms", e.time_ms)
+        };
         let err = e.error.as_deref().map(|x| format!(r#"<span class="k-inf-err">{}</span>"#, esc(x))).unwrap_or_default();
         rows.push_str(&format!(
-            r#"<tr><td>{}</td><td>{}</td><td>{} ms</td><td><span class="k-inf-dot k-inf-{}"></span>{}</td></tr>"#,
-            esc(&e.name), e.count, e.time_ms, status, err));
+            r#"<tr><td>{}</td><td>{}</td><td>{}</td><td><span class="k-inf-dot k-inf-{}"></span>{}</td></tr>"#,
+            esc(&e.name), e.count, time, status, err));
     }
-    format!(r#"<div class="k-inf-sum">{ok} of {} engines replied in {} ms · {} results</div>
+    let total_str = if out.total_ms >= 1000 { format!("{:.1} s", out.total_ms as f64 / 1000.0) } else { format!("{} ms", out.total_ms) };
+    format!(r#"<div class="k-inf-sum">{ok} of {} engines replied in {total_str} · {} results</div>
 <table class="k-inf-tbl"><thead><tr><th>engine</th><th>results</th><th>time</th><th>status</th></tr></thead><tbody>{rows}</tbody></table>"#,
-        out.engines.len(), out.total_ms, total)
+        out.engines.len(), total)
 }
 
 fn ai_card(q: &str, out: &SearchOutcome) -> String {
@@ -429,7 +432,7 @@ fn video_grid(rs: &[SearchResult]) -> String {
         let dur = r.duration.clone().unwrap_or_default();
         let by = r.publisher.clone().filter(|p| !p.is_empty()).unwrap_or_else(|| r.source.clone());
         let thumb_html = if thumb.is_empty() { String::new() } else {
-            format!(r#"<img src="{}" loading="lazy" alt="">"#, thumb)
+            format!(r#"<img src="{}" loading="lazy" alt="" onerror="this.style.display='none'">"#, thumb)
         };
         o.push_str(&format!(
             r#"<a class="k-vid" href="{}" rel="noopener noreferrer" target="_blank">
@@ -467,7 +470,7 @@ fn music_grid(rs: &[SearchResult]) -> String {
 </article>
 "#,
         esc(&r.url), esc(&r.url), esc(&r.title), esc(&r.desc),
-        img = if thumb.is_empty() { String::new() } else { format!(r#"<img src="/img?u={}" loading="lazy" alt="">"#, urlencode(&thumb)) }));
+        img = if thumb.is_empty() { String::new() } else { format!(r#"<img src="/img?u={}" loading="lazy" alt="" onerror="this.style.display='none'">"#, urlencode(&thumb)) }));
     }
     o.push_str("</div>");
     o
@@ -494,28 +497,6 @@ fn map_grid(rs: &[SearchResult]) -> String {
     }
     o.push_str("</div>");
     o
-}
-
-fn pagination(out: &SearchOutcome, p: &SearchParams) -> String {
-    let all_paged = {
-        let engines = engines_for(p);
-        !engines.is_empty() && engines.iter().all(|e| e.paged)
-    };
-    let next_disabled = !all_paged || out.results.len() < 4;
-    let prev = if p.page > 1 {
-        format!(r#"<a class="k-pg-btn" href="{}">Previous</a>"#,
-            qs("/search", &p.query, p.category.as_str(), &p.language, &p.time, p.safesearch, p.page - 1))
-    } else {
-        r#"<span class="k-pg-btn k-pg-off">Previous</span>"#.to_string()
-    };
-    let next = if next_disabled {
-        r#"<span class="k-pg-btn k-pg-off">Next</span>"#.to_string()
-    } else {
-        format!(r#"<a class="k-pg-btn" href="{}">Next</a>"#,
-            qs("/search", &p.query, p.category.as_str(), &p.language, &p.time, p.safesearch, p.page + 1))
-    };
-    format!(r#"<nav class="k-pg" aria-label="Pagination">{prev}<span class="k-pg-n">Page {page}</span>{next}</nav>"#,
-        page = p.page)
 }
 
 // ---------------------------------------------------------------------------
@@ -555,8 +536,8 @@ fn settings_modal() -> String {
     o.push_str(&dd("s-dd-ss", "ss", &[("0","Off"),("1","Moderate"),("2","Strict")], "0", false));
     o.push_str(r#"</div>
           <div class="k-p-row"><label for="s-ac">Autocomplete</label><label class="k-switch"><input type="checkbox" id="s-ac"><span class="k-sl"></span></label></div>
-          <div class="k-p-row"><label for="s-inf">Infinite scroll</label><label class="k-switch"><input type="checkbox" id="s-inf"><span class="k-sl"></span></label></div>
           <div class="k-p-row"><label for="s-newtab">Open results in new tab</label><label class="k-switch"><input type="checkbox" id="s-newtab"><span class="k-sl"></span></label></div>
+          <div class="k-p-row k-p-gh"><span class="k-p-gh-note">KurokaSearch is free software (AGPL)</span><a class="k-gh-link" href="https://github.com/Abdullayews/KurokaSearch" target="_blank" rel="noopener">GitHub</a></div>
         </section>
         <section class="k-set-pane" data-pane="appearance">
           <div class="k-p-row"><label for="s-theme">Theme</label>"#);

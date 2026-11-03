@@ -86,7 +86,7 @@ fn handle(req: tiny_http::Request) {
                 match fetch_image_cached(&u) {
                     Ok((ctype, bytes)) => {
                         let _ = respond(req, 200, Header::from_bytes(&b"Content-Type"[..], ctype.as_bytes()).unwrap(),
-                            bytes, Some("public, max-age=86400"));
+                            bytes, Some("no-store, max-age=0"));
                     }
                     Err(e) => text(req, 502, &engine::clip(&e, 120)),
                 }
@@ -113,9 +113,10 @@ fn respond(req: tiny_http::Request, code: u16, ct: Header, body: Vec<u8>, cache:
     resp.add_header(ct);
     resp.add_header(Header::from_bytes(&b"X-Content-Type-Options"[..], &b"nosniff"[..]).unwrap());
     resp.add_header(Header::from_bytes(&b"Referrer-Policy"[..], &b"no-referrer"[..]).unwrap());
-    if let Some(c) = cache {
-        resp.add_header(Header::from_bytes(&b"Cache-Control"[..], c.as_bytes()).unwrap());
-    }
+    // Cache policy: ONLY the mascot art is long-cached. Everything else —
+    // pages, proxies, styles, scripts — is never stored anywhere.
+    let c = cache.unwrap_or("no-store, max-age=0");
+    resp.add_header(Header::from_bytes(&b"Cache-Control"[..], c.as_bytes()).unwrap());
     req.respond(resp)
 }
 
@@ -211,7 +212,14 @@ fn serve_static(req: tiny_http::Request, url_path: &str) {
     match std::fs::read(&full) {
         Ok(bytes) => {
             let ct = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
-            let _ = respond(req, 200, ct, bytes, Some("public, max-age=86400"));
+            // Only the mascot art stays in the browser cache; every other
+            // asset (css, js, banner, icons…) is served no-store.
+            let cache = if rel.starts_with("brand/mascot") {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-store, max-age=0"
+            };
+            let _ = respond(req, 200, ct, bytes, Some(cache));
         }
         Err(_) => text(req, 404, "not found"),
     }
