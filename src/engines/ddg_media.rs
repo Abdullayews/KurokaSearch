@@ -104,9 +104,13 @@ pub fn ddg_images(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
             let h = it.get("height").and_then(|x| x.as_u64()).map(|x| x as u32);
             // honor the Extras size/layout filters the same way Bing does
             if !matches_size(w, h, &p.size) || !matches_layout(w, h, &p.layout) { continue; }
+            // the grid shows DDG's lightweight thumbnail when present; the
+            // click-through stays the full-size image
+            let thumb = it.get("thumbnail").and_then(|x| x.as_str()).filter(|u| u.starts_with("http"))
+                .map(|u| u.to_string()).unwrap_or_else(|| image.clone());
             let mut r = SearchResult::new("image", clip(&title, 110), page_url.clone(), clip(&page_url, 200));
-            r.img = Some(image.clone());
-            r.thumb = Some(image);
+            r.img = Some(image);
+            r.thumb = Some(thumb);
             r.width = w;
             r.height = h;
             r.meta.push(("engine".into(), "duckduckgo".into()));

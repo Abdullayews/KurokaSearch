@@ -182,13 +182,12 @@ pub struct SearchOutcome {
 }
 
 pub const REGISTRY: &[EngineInfo] = &[
-    // all
-    EngineInfo { id: "bing", name: "Bing Web", category: "all", default_on: true, paged: true },
+    // all — bing's RSS endpoint ignores `first` for datacenter sessions,
+    // so it contributes page 1 only (honest paged=false)
+    EngineInfo { id: "bing", name: "Bing Web", category: "all", default_on: true, paged: false },
     EngineInfo { id: "ddg", name: "DuckDuckGo", category: "all", default_on: true, paged: true },
     EngineInfo { id: "wikipedia", name: "Wikipedia", category: "all", default_on: true, paged: true },
     EngineInfo { id: "wikidata", name: "Wikidata", category: "all", default_on: true, paged: true },
-    EngineInfo { id: "wiby", name: "Wiby", category: "all", default_on: true, paged: true },
-    EngineInfo { id: "marginalia", name: "Marginalia", category: "all", default_on: false, paged: false },
     // images
     EngineInfo { id: "bing_images", name: "Bing Images", category: "images", default_on: true, paged: true },
     EngineInfo { id: "ddg_images", name: "DuckDuckGo", category: "images", default_on: false, paged: true },
@@ -197,13 +196,13 @@ pub const REGISTRY: &[EngineInfo] = &[
     // videos
     EngineInfo { id: "youtube", name: "YouTube", category: "videos", default_on: true, paged: false },
     EngineInfo { id: "ddg_videos", name: "DuckDuckGo", category: "videos", default_on: true, paged: true },
-    EngineInfo { id: "sepiasearch", name: "PeerTube", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "dailymotion", name: "Dailymotion", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "odysee", name: "Odysee", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "archiveorg", name: "Internet Archive", category: "videos", default_on: true, paged: true },
-    // news
-    EngineInfo { id: "gnews", name: "Google News", category: "news", default_on: true, paged: true },
-    EngineInfo { id: "bing_news", name: "Bing News", category: "news", default_on: true, paged: true },
+    // news — Google News and Bing News RSS feeds cannot page; pagination on
+    // this tab is carried by DuckDuckGo News and Yahoo News
+    EngineInfo { id: "gnews", name: "Google News", category: "news", default_on: true, paged: false },
+    EngineInfo { id: "bing_news", name: "Bing News", category: "news", default_on: true, paged: false },
     EngineInfo { id: "ddg_news", name: "DuckDuckGo News", category: "news", default_on: true, paged: true },
     EngineInfo { id: "yahoo_news", name: "Yahoo News", category: "news", default_on: true, paged: true },
     // maps
@@ -214,7 +213,6 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "deezer", name: "Deezer", category: "music", default_on: false, paged: true },
     EngineInfo { id: "musicbrainz", name: "MusicBrainz", category: "music", default_on: true, paged: true },
     EngineInfo { id: "mixcloud", name: "Mixcloud", category: "music", default_on: true, paged: true },
-    EngineInfo { id: "audius", name: "Audius", category: "music", default_on: true, paged: true },
     EngineInfo { id: "archive_audio", name: "Archive Audio", category: "music", default_on: true, paged: true },
     // it
     EngineInfo { id: "stackexchange", name: "Stack Overflow", category: "it", default_on: true, paged: true },
@@ -239,12 +237,9 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "annas", name: "Anna's Archive", category: "files", default_on: true, paged: true },
     EngineInfo { id: "libgen", name: "LibGen", category: "files", default_on: true, paged: false },
     EngineInfo { id: "nyaa", name: "Nyaa", category: "files", default_on: true, paged: true },
-    EngineInfo { id: "knaben", name: "Knaben", category: "files", default_on: true, paged: true },
     EngineInfo { id: "solid", name: "SolidTorrents", category: "files", default_on: true, paged: true },
-    EngineInfo { id: "tdl", name: "TorrentDownload", category: "files", default_on: true, paged: false },
     EngineInfo { id: "apibay", name: "The Pirate Bay", category: "files", default_on: true, paged: true },
     EngineInfo { id: "gutenberg", name: "Project Gutenberg", category: "files", default_on: true, paged: true },
-    EngineInfo { id: "standardebooks", name: "Standard Ebooks", category: "files", default_on: true, paged: true },
     // social
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
     EngineInfo { id: "reddit", name: "Reddit", category: "social", default_on: false, paged: true },
@@ -266,40 +261,74 @@ pub fn engines_for(params: &SearchParams) -> Vec<&'static EngineInfo> {
 
 // ---------------------------------------------------------------------------
 // fan-out runner (threads, per-engine timing, dedupe + round-robin interleave)
+//
+// Speed contract: the page NEVER waits for the slowest engine. Every engine
+// reports through a channel and the runner stops listening after a global
+// deadline (8 s) — engines that miss it simply do not make it onto the page
+// (their threads finish and die on their own). Later pages (page > 1) only
+// re-query engines that genuinely paginate; unpaged ones would return their
+// first page again, which would only produce duplicates.
 // ---------------------------------------------------------------------------
+
+/// How long a search page waits for engines overall.
+const SEARCH_DEADLINE: Duration = Duration::from_millis(8000);
 
 pub fn run_search(params: &SearchParams) -> SearchOutcome {
     let started = Instant::now();
-    let engines = engines_for(params);
+    let mut engines = engines_for(params);
+    if params.page > 1 {
+        engines.retain(|e| e.paged);
+    }
     let mut outcomes: Vec<EngineOutcome> = Vec::new();
     let mut buckets: Vec<Vec<SearchResult>> = Vec::new();
 
     type Ret = Result<Vec<SearchResult>, String>;
-    let handles: Vec<thread::JoinHandle<(String, String, u64, Ret)>> = engines.iter().map(|e| {
+    let (tx, rx) = std::sync::mpsc::channel::<(String, String, u64, Ret)>();
+    let mut spawned: Vec<(String, String)> = Vec::new();
+    for e in engines {
         let p = params.clone();
         let id = e.id.to_string();
         let name = e.name.to_string();
+        spawned.push((id.clone(), name.clone()));
+        let tx = tx.clone();
         thread::spawn(move || {
             let t0 = Instant::now();
-            let r = crate::engines::run(&id, &p);
+            // an engine panic must still report back, or the runner would
+            // sit out the whole deadline waiting for it
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::engines::run(&id, &p)
+            })).unwrap_or_else(|_| Err("engine panicked".into()));
             let ms = t0.elapsed().as_millis() as u64;
-            (id, name, ms, r)
-        })
-    }).collect();
+            let _ = tx.send((id, name, ms, r));
+        });
+    }
+    drop(tx);
 
-    for h in handles {
-        let (id, name, ms, res) = h.join().unwrap_or((
-            "?".into(), "?".into(), 0, Err("engine thread panicked".into())));
-        match res {
-            Ok(rs) => {
-                outcomes.push(EngineOutcome { id, name, count: rs.len(), time_ms: ms, ok: true, error: None });
-                buckets.push(rs);
+    let mut heard = 0usize;
+    while heard < spawned.len() {
+        let Some(left) = SEARCH_DEADLINE.checked_sub(started.elapsed()) else { break };
+        match rx.recv_timeout(left) {
+            Ok((id, name, ms, res)) => {
+                heard += 1;
+                match res {
+                    Ok(rs) => {
+                        outcomes.push(EngineOutcome { id, name, count: rs.len(), time_ms: ms, ok: true, error: None });
+                        buckets.push(rs);
+                    }
+                    Err(e) => {
+                        outcomes.push(EngineOutcome { id, name, count: 0, time_ms: ms, ok: false,
+                            error: Some(clip(&e, 120)) });
+                    }
+                }
             }
-            Err(e) => {
-                outcomes.push(EngineOutcome { id, name, count: 0, time_ms: ms, ok: false,
-                    error: Some(clip(&e, 120)) });
-            }
+            Err(_) => break, // deadline reached
         }
+    }
+    // engines that never answered within the deadline
+    for (id, name) in spawned.iter().skip(heard) {
+        outcomes.push(EngineOutcome { id: id.clone(), name: name.clone(), count: 0,
+            time_ms: started.elapsed().as_millis() as u64, ok: false,
+            error: Some("timed out".into()) });
     }
 
     // round-robin interleave for engine diversity, dedupe by URL
@@ -358,7 +387,11 @@ fn http_client() -> &'static reqwest::blocking::Client {
         let mut b = reqwest::blocking::Client::builder()
             .gzip(true)
             .brotli(true)
-            .cookie_store(true);
+            .cookie_store(true)
+            .tcp_nodelay(true)                 // latency over throughput
+            .pool_idle_timeout(Duration::from_secs(120))
+            .pool_max_idle_per_host(10)        // warm keep-alive conns per engine
+            .connect_timeout(Duration::from_secs(5));
         if let Ok(px) = std::env::var("KUROKA_PROXY") {
             let px = px.trim().to_string();
             if !px.is_empty() {
@@ -459,6 +492,10 @@ fn ddg_client() -> &'static reqwest::blocking::Client {
             .gzip(true)
             .brotli(true)
             .cookie_store(true)
+            .tcp_nodelay(true)
+            .pool_idle_timeout(Duration::from_secs(120))
+            .pool_max_idle_per_host(10)
+            .connect_timeout(Duration::from_secs(5))
             .resolve("duckduckgo.com", pin)
             .resolve("html.duckduckgo.com", pin)
             .build()

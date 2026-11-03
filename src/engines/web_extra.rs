@@ -110,71 +110,18 @@ fn ddg_unwrap(href: &str) -> String {
     if href.starts_with("http") { href.to_string() } else { String::new() }
 }
 
-/// value of the attribute that opens right before the current position
-fn attr_after(chunk: &str, prefix: &str) -> Option<String> {
-    let i = chunk.find(prefix)?;
-    let rest = &chunk[i + prefix.len()..];
-    // find the closing quote
-    let q = rest.chars().next()?;
-    if q != '"' && q != '\'' { return None; }
-    let end = rest[1..].find(q)?;
-    Some(rest[1..1 + end].to_string())
-}
-
-// ---------------------------------------------------------------------------
-// Marginalia — independent index. Two-step handshake (token + 2s wait),
-// so it runs only when explicitly enabled.
-// ---------------------------------------------------------------------------
-
-pub fn marginalia_search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
-    let q = urlencode(&p.query);
-    let first = format!("https://old-search.marginalia.nu/search?query={q}");
-    let page1 = http_get(&first, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10))?;
-    let sst = page1.split("sst=").nth(1)
-        .map(|rest| rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '=' || *c == 'S').collect::<String>())
-        .unwrap_or_default();
-    if sst.is_empty() {
-        return Err("handshake failed".into());
-    }
-    thread::sleep(Duration::from_millis(2100));
-    let second = format!("https://old-search.marginalia.nu/search?query={q}&sst={sst}");
-    let body = http_get(&second, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10))?;
-    if !body.contains("search-result") { return Ok(vec![]); }
-    let mut out = Vec::new();
-    for block in body.split(r#"class="card search-result""#).skip(1) {
-        let url = block.split(r#"class="url""#).nth(1)
-            .and_then(|s| attr_after(s, "href=\""))
-            .unwrap_or_default();
-        let title = block.split(r#"class="title""#).nth(1)
-            .and_then(|s| attr_after(s, "href=\"").map(|_| {
-                let seg = s.split("</a>").next().unwrap_or(s);
-                decode_entities(&strip_tags(seg).trim())
-            }))
-            .unwrap_or_default();
-        if url.is_empty() || title.is_empty() || !url.starts_with("http") { continue; }
-        let desc = block.split(r#"class="description""#).nth(1)
-            .map(|s| {
-                let seg = s.split("</p>").next().unwrap_or(s);
-                decode_entities(&strip_tags(seg).trim())
-            })
-            .unwrap_or_default();
-        let mut r = SearchResult::web(title, url, clip(&desc, 300));
-        r.meta.push(("engine".into(), "marginalia".into()));
-        out.push(r);
-        if out.len() >= 20 { break; }
-    }
-    Ok(out)
-}
-
 // ---------------------------------------------------------------------------
 // Wikidata — entity search (labels + descriptions).
 // ---------------------------------------------------------------------------
 
 pub fn wikidata_search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let lang = wiki_lang(&p.language);
-    let url = format!(
+    // `continue` is the real paging knob of wbsearchentities
+    let cont = (p.page.max(1) - 1) * 10;
+    let mut url = format!(
         "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language={lang}&uselang={lang}&format=json&limit=10",
         urlencode(&p.query));
+    if cont > 0 { url.push_str(&format!("&continue={cont}")); }
     let body = http_get(&url, CONTACT_UA, &[("Accept", "application/json")], Duration::from_secs(10))?;
     let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
     let mut out = Vec::new();

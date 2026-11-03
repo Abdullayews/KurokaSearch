@@ -256,9 +256,12 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
     // ---- body: results run the full width in ONE column; Extras sits BESIDE
     // them when open. The AI report is a full-width horizontal band in the
     // gap between the filter buttons and the first link (All tab only). ----
+    // infinite scroll keeps going while ANY queried engine pages natively
+    // (previously a single unpaged engine — youtube on videos — silently
+    // disabled pagination for the whole tab)
     let more = {
         let engines = engines_for(p);
-        (engines.iter().all(|e| e.paged) && out.results.len() >= 4 && p.page < 50) as u8
+        (engines.iter().any(|e| e.paged) && out.results.len() >= 4 && p.page < 50) as u8
     };
     if p.category == Category::All {
         o.push_str(&format!(r#"<div class="k-ai-band">{}</div>"#, ai_card(&p.query, out)));
@@ -377,6 +380,8 @@ fn web_list(rs: &[SearchResult]) -> String {
         } else {
             ""
         };
+        // engine chip floats to the right of the site line
+        let mut eng_chip = String::new();
         let mut meta = String::new();
         if let Some(d) = &r.published {
             if !d.is_empty() {
@@ -385,24 +390,49 @@ fn web_list(rs: &[SearchResult]) -> String {
         }
         for (k, v) in &r.meta {
             if k == "engine" {
-                meta.push_str(&format!(r#"<span class="k-r-eng">{}</span>"#, esc(v)));
+                eng_chip = format!(r#"<span class="k-r-eng">{}</span>"#, esc(v));
             } else if k == "page" {
-                meta.push_str(&format!(r#"<a class="k-r-eng" href="{}" rel="noopener noreferrer" target="_blank">details</a>"#, esc(v)));
+                meta.push_str(&format!(r#"<a class="k-r-kv k-r-kv-a" href="{}" rel="noopener noreferrer" target="_blank">details</a>"#, esc(v)));
             } else {
                 meta.push_str(&format!(r#"<span class="k-r-kv"><b>{}</b> {}</span>"#, esc(k), esc(v)));
             }
         }
+        // breadcrumb: the URL path under the host name
+        let path = url_path(&r.url);
+        let path_html = if path.is_empty() { String::new() } else {
+            format!(r#"<span class="k-r-path">{}</span>"#, esc(&path))
+        };
+        let desc = if r.desc.is_empty() { String::new() } else {
+            format!(r#"<p class="k-r-desc">{}</p>"#, esc(&r.desc))
+        };
         o.push_str(&format!(r#"<article class="k-r">
-  <div class="k-r-head">{av}<a class="k-r-url" href="{url}" rel="noopener noreferrer">{src}</a>{magnet}</div>
+  <div class="k-r-head">{av}<span class="k-r-site"><a class="k-r-url" href="{url}" rel="noopener noreferrer">{src}</a>{path_html}</span>{eng_chip}{magnet}</div>
   <a class="k-r-title" href="{url}" rel="noopener noreferrer">{title}</a>
-  <p class="k-r-desc">{desc}</p>
+  {desc}
   <div class="k-r-meta">{meta}</div>
 </article>
 "#,
-        url = esc(&r.url), src = esc(&r.source), title = esc(&r.title), desc = esc(&r.desc)));
+        url = esc(&r.url), src = esc(&r.source), title = esc(&r.title)));
     }
     o.push_str("</div>");
     o
+}
+
+/// Human breadcrumb of a result URL: "/repo/name/…", empty for bare hosts
+/// and magnets.
+fn url_path(u: &str) -> String {
+    if u.starts_with("magnet:") { return String::new(); }
+    let rest = u.split_once("://").map(|(_, r)| r).unwrap_or(u);
+    let Some((_, tail)) = rest.split_once('/') else { return String::new() };
+    let tail = tail.split('?').next().unwrap_or(tail);
+    let tail = tail.split('#').next().unwrap_or(tail);
+    let tail = tail.trim_end_matches('/');
+    if tail.is_empty() { return String::new(); }
+    let mut out = format!("/{tail}");
+    if out.chars().count() > 56 {
+        out = format!("…{}", out.chars().skip(out.chars().count() - 55).collect::<String>());
+    }
+    out
 }
 
 fn image_grid(rs: &[SearchResult]) -> String {
@@ -414,17 +444,27 @@ fn image_grid(rs: &[SearchResult]) -> String {
             (Some(w), Some(h)) => format!("{w}×{h}"),
             _ => String::new(),
         };
+        // a known aspect-ratio reserves the tile's height BEFORE the lazy
+        // image arrives — without it the grid collapses, the scroll sentinel
+        // fires early and infinite scroll burns through all pages unseen
+        let ar = match (r.width, r.height) {
+            (Some(w), Some(h)) if w > 0 && h > 0 => format!(" style=\"aspect-ratio:{w}/{h}\""),
+            _ => String::new(),
+        };
         let mut lic = String::new();
         for (k, v) in &r.meta {
             if k == "license" { lic = v.clone(); }
         }
-        o.push_str(&format!(r#"<a class="k-img" href="{}" rel="noopener noreferrer" target="_blank">
+        let title_attr = esc(&r.title);
+        o.push_str(&format!(r#"<a class="k-img" href="{}" rel="noopener noreferrer" target="_blank"{ar}>
   <img src="{thumb}" loading="lazy" alt="{}" onerror="this.closest('.k-img').classList.add('k-img-dead')">
+  <span class="k-img-cap">{}</span>
   <span class="k-img-res">{res}</span>
   <span class="k-img-src">{}{lic_s}</span>
 </a>
 "#,
-        esc(&r.url), esc(&r.title), esc(&r.source),
+        esc(&r.url), esc(&r.title), title_attr,
+        esc(&r.source),
         lic_s = if lic.is_empty() { String::new() } else { format!(" · {}", esc(&lic)) }));
     }
     o.push_str("</div>");
@@ -441,14 +481,27 @@ fn video_grid(rs: &[SearchResult]) -> String {
         let thumb_html = if thumb.is_empty() { String::new() } else {
             format!(r#"<img src="{}" loading="lazy" alt="" onerror="this.style.display='none'">"#, thumb)
         };
+        // byline: channel · views · date — everything on one quiet line
+        let mut bybits: Vec<String> = vec![esc(&by)];
+        for (k, v) in &r.meta {
+            if k == "views" || k == "seeders" || k == "size" { bybits.push(esc(v)); }
+        }
+        if let Some(d) = &r.published {
+            if !d.is_empty() {
+                bybits.push(format!(r#"<span class="k-r-date" data-d="{}"></span>"#, esc(d)));
+            }
+        }
+        let byline = bybits.join(" · ");
         o.push_str(&format!(
             r#"<a class="k-vid" href="{}" rel="noopener noreferrer" target="_blank">
   <span class="k-vid-thumb">{thumb_html}<span class="k-vid-dur">{}</span></span>
-  <span class="k-vid-title">{}</span>
-  <span class="k-vid-by">{}</span>
+  <span class="k-vid-body">
+    <span class="k-vid-title">{}</span>
+    <span class="k-vid-by">{byline}</span>
+  </span>
 </a>
 "#,
-            esc(&r.url), esc(&dur), esc(&r.title), esc(&by)));
+            esc(&r.url), esc(&dur), esc(&r.title)));
     }
     o.push_str("</div>");
     o
@@ -599,7 +652,7 @@ fn settings_modal() -> String {
             </div>
           </div>
           <div class="k-accent-bar" aria-hidden="true"></div>
-          <p class="k-set-note">The accent recolors buttons, links, borders, particles, the mascot and the favicon — everywhere. It is stored only in this browser. Empty hex = default gold.</p>
+          <p class="k-set-note">The accent recolors buttons, links, borders, highlights and particles across every tab. The mascot, the wordmark and the app icons keep their original artwork. Stored only in this browser; empty hex = default gold.</p>
           <p class="k-set-note">Background is transparent by default: with the Zen Internet extension your wallpaper shows through; without it Kuroka falls back to a true-black AMOLED theme.</p>
         </section>
         <section class="k-set-pane" data-pane="ai">

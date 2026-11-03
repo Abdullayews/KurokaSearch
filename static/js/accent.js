@@ -1,13 +1,13 @@
 /* KurokaSearch — accent color engine.
    Loaded synchronously in <head> so a saved custom accent paints before
    the first frame (no gold flash). Exposes window.__kAcc for kuroka.js.
-   Everything is stored in localStorage only — nothing leaves the browser. */
+   The accent paints the INTERFACE only — the mascot, the wordmark and the
+   app icons keep their original artwork. Everything is stored in
+   localStorage only — nothing leaves the browser. */
 (function () {
   "use strict";
 
   var DEFAULT = "#e6b445";
-  var GOLD_HUE = 41.4;   /* hue of the default gold, for mascot hue-rotate */
-  var GOLD_SAT = 0.763;  /* saturation of the default gold */
 
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
@@ -63,16 +63,6 @@
     }
     var gold = hslHex(h, s, l);
     var rgb = hexRgb(gold);
-    /* mascot art hue-rotation: shift gold's hue onto the picked hue */
-    var shift, sat;
-    if (s < 0.15) {           /* near-neutral pick: desaturate the art instead */
-      shift = 0;
-      sat = clamp(0.2 + s * 2.2, 0.2, 0.7);
-    } else {
-      var d = ((h - GOLD_HUE) % 360 + 540) % 360 - 180;
-      shift = Math.round(d);
-      sat = clamp(s / GOLD_SAT, 0.6, 1.3);
-    }
     /* on ivory the emphasis inverts: gold-2 goes darker, gold-3 lighter */
     return {
       gold: gold,
@@ -82,13 +72,11 @@
                    : hslHex(h, s, clamp(l - 0.17, 0.05, 1)),
       ink: hslHex(h, Math.min(1, s * 0.85), 0.075),
       rgb: rgb ? (rgb[0] + ", " + rgb[1] + ", " + rgb[2]) : "230, 180, 69",
-      hue: shift,
-      sat: Math.round(sat * 100) / 100,
       base: { h: h, s: s, l: l }
     };
   }
 
-  var PROPS = ["--gold", "--gold-2", "--gold-3", "--gold-rgb", "--gold-ink", "--hue-shift", "--hue-sat"];
+  var PROPS = ["--gold", "--gold-2", "--gold-3", "--gold-rgb", "--gold-ink"];
 
   function setOn(el, r) {
     if (!el || !el.style) return;
@@ -98,8 +86,6 @@
     el.style.setProperty("--gold-3", r.gold3);
     el.style.setProperty("--gold-rgb", r.rgb);
     el.style.setProperty("--gold-ink", r.ink);
-    el.style.setProperty("--hue-shift", r.hue + "deg");
-    el.style.setProperty("--hue-sat", String(r.sat));
   }
 
   var listeners = [];
