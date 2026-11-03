@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let url = format!("https://www.torrentdownload.info/search?q={}", urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://www.torrentdownload.info/", &[], Duration::from_secs(12))?;
     if !body.contains("tt-name") { return Ok(vec![]); }
     let mut out = Vec::new();
     for row in body.split("<div class=\"tt-name\">").skip(1) {

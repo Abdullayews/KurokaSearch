@@ -29,7 +29,7 @@ pub fn bing_images(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let url = format!(
         "https://www.bing.com/images/async?q={}&first={first}&count=35&mmr=1{qft}",
         urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://www.bing.com/", &[], Duration::from_secs(12))?;
     let mut out = Vec::new();
     for tile in body.split(r#"class="iusc""#).skip(1) {
         let Some(mraw) = attr_m(tile) else { continue };
@@ -208,6 +208,49 @@ pub fn sepiasearch(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
             out.push(r);
             if out.len() >= 12 { break; }
         }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Odysee — the Lighthouse search index (LBRY blockchain, decentralized).
+// claimType=stream keeps channels out; `include` adds titles + thumbs.
+// ---------------------------------------------------------------------------
+
+pub fn odysee_search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
+    let from = (p.page.max(1) - 1) * 20;
+    let nsfw = if p.safesearch >= 1 { "false" } else { "true" };
+    let url = format!(
+        "https://lighthouse.odysee.com/search?s={}&size=20&from={from}&claimType=stream&nsfw={nsfw}&include=channel,title,thumbnail_url",
+        urlencode(&p.query));
+    let body = http_get(&url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10))?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
+    let arr = v.as_array().cloned().unwrap_or_default();
+    let mut out = Vec::new();
+    for it in arr {
+        let name = it.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let claim = it.get("claimId").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if name.is_empty() || claim.is_empty() || name.starts_with('@') { continue; }
+        let title = it.get("title").and_then(|x| x.as_str())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| name.replace(['-', '_'], " "));
+        let channel = it.get("channel").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let channel_id = it.get("channel_claim_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let link = if !channel.is_empty() && !channel_id.is_empty() {
+            format!("https://odysee.com/{channel}:{channel_id}/{name}:{claim}")
+        } else {
+            format!("https://odysee.com/{name}:{claim}")
+        };
+        let thumb = it.get("thumbnail_url").and_then(|x| x.as_str())
+            .filter(|u| u.starts_with("http")).map(|u| u.to_string());
+        let mut r = SearchResult::new("video", clip(&title, 110), link, String::new());
+        r.publisher = if channel.is_empty() { Some("odysee.com".into()) } else { Some(channel.clone()) };
+        r.thumb = thumb;
+        if !channel.is_empty() { r.meta.push(("by".into(), channel)); }
+        r.meta.push(("engine".into(), "odysee".into()));
+        out.push(r);
+        if out.len() >= 20 { break; }
     }
     Ok(out)
 }

@@ -64,7 +64,10 @@
 
   /* ------------------------------------------------------------------ *
    * particles — every action sparks: clicks, taps, key presses, scroll.
-   * Mouse movement is deliberately excluded. Respects reduced motion.
+   * Mouse movement is deliberately excluded. Five particle kinds
+   * (sparks with comet trails, twinkling stars, shock rings, rising
+   * embers, side streaks) drawn with additive blending for a real glow.
+   * Respects reduced motion.
    * ------------------------------------------------------------------ */
 
   (function () {
@@ -87,58 +90,142 @@
       window.addEventListener("resize", resize);
 
       var parts = [];
-      var COLORS = ["#e6b445", "#f0c65e", "#d29a2f", "#fff3d6"];
+      var CAP = 700;
+      var COLORS = ["#e6b445", "#f0c65e", "#d29a2f", "#fff3d6", "#ffd98a", "#f7e6b0"];
+      var SPARK = 0, STAR = 1, RING = 2, EMBER = 3, STREAK = 4;
 
-      function spawn(x, y, n, spread, lift) {
+      function rnd(a, b) { return a + Math.random() * (b - a); }
+      function pick() { return COLORS[(Math.random() * COLORS.length) | 0]; }
+
+      function spark(x, y, n, spread, lift) {
         for (var i = 0; i < n; i++) {
           var a = Math.random() * Math.PI * 2;
           var v = Math.random() * spread + 0.35;
-          parts.push({
-            x: x, y: y,
-            vx: Math.cos(a) * v,
-            vy: Math.sin(a) * v - (lift || 0),
-            r: Math.random() * 2.1 + 0.7,
-            c: COLORS[(Math.random() * COLORS.length) | 0],
-            life: 1,
-            decay: 0.016 + Math.random() * 0.026
-          });
+          parts.push({ t: SPARK, x: x, y: y, px: x, py: y,
+            vx: Math.cos(a) * v, vy: Math.sin(a) * v - (lift || 0),
+            r: rnd(0.8, 3.1), c: pick(),
+            life: 1, decay: rnd(0.014, 0.036) });
         }
-        if (parts.length > 350) parts.splice(0, parts.length - 350);
+      }
+      function star(x, y, n) {
+        for (var i = 0; i < n; i++) {
+          parts.push({ t: STAR, x: x + rnd(-16, 16), y: y + rnd(-12, 12),
+            vx: rnd(-0.25, 0.25), vy: rnd(-0.5, -0.08),
+            r: rnd(3.5, 7.5), c: pick(), rot: Math.random() * Math.PI,
+            vr: rnd(-0.06, 0.06), life: 1, decay: rnd(0.012, 0.026) });
+        }
+      }
+      function ring(x, y) {
+        parts.push({ t: RING, x: x, y: y, r: 4, vr: rnd(2.4, 3.8),
+          c: pick(), life: 1, decay: 0.048 });
+      }
+      function ember(x, y) {
+        parts.push({ t: EMBER, x: x, y: y, px: x, py: y,
+          vx: rnd(-0.3, 0.3), vy: -rnd(0.8, 2.4),
+          r: rnd(1, 2.7), c: pick(), flick: Math.random() * 6.28,
+          life: 1, decay: rnd(0.006, 0.014) });
+      }
+      function streak(x, y) {
+        parts.push({ t: STREAK, x: x, y: y, vx: 0, vy: -rnd(4, 7.5),
+          len: rnd(10, 28), r: 1.2, c: pick(), life: 1, decay: 0.032 });
+      }
+      function cap() { if (parts.length > CAP) parts.splice(0, parts.length - CAP); }
+
+      function drawStar(p) {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        var s = p.r * (0.5 + p.life * 0.5);
+        ctx.strokeStyle = p.c;
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(-s, 0); ctx.lineTo(s, 0);
+        ctx.moveTo(0, -s); ctx.lineTo(0, s);
+        ctx.stroke();
+        var s2 = s * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(-s2, 0); ctx.lineTo(s2, 0);
+        ctx.moveTo(0, -s2); ctx.lineTo(0, s2);
+        ctx.stroke();
+        ctx.restore();
       }
 
       var raf = 0;
       function tick() {
         raf = 0;
         ctx.clearRect(0, 0, W, H);
+        ctx.globalCompositeOperation = "lighter";
         for (var i = parts.length - 1; i >= 0; i--) {
           var p = parts[i];
-          p.x += p.vx; p.y += p.vy;
-          p.vy += 0.05; p.vx *= 0.985; p.vy *= 0.985;
           p.life -= p.decay;
           if (p.life <= 0) { parts.splice(i, 1); continue; }
-          ctx.globalAlpha = p.life > 0 ? p.life : 0;
-          ctx.fillStyle = p.c;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.r * (0.45 + p.life * 0.55), 0, 6.28318);
-          ctx.fill();
+          if (p.t === RING) {
+            p.r += p.vr; p.vr *= 0.94;
+            ctx.globalAlpha = p.life * 0.7;
+            ctx.strokeStyle = p.c;
+            ctx.lineWidth = 1.6 * p.life + 0.4;
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.28318); ctx.stroke();
+            continue;
+          }
+          p.px = p.x; p.py = p.y;
+          p.x += p.vx; p.y += p.vy;
+          if (p.t === SPARK) { p.vy += 0.05; p.vx *= 0.985; p.vy *= 0.985; }
+          else if (p.t === EMBER) { p.vy -= 0.012; p.vx += Math.sin((1 - p.life) * 9 + p.flick) * 0.012; }
+          else if (p.t === STAR) { p.rot += p.vr; p.vy += 0.008; }
+          var a = p.life;
+          if (p.t === EMBER) a *= 0.55 + 0.45 * Math.abs(Math.sin((1 - p.life) * 14 + p.flick));
+          ctx.globalAlpha = a;
+          if (p.t === STAR) {
+            drawStar(p);
+          } else if (p.t === STREAK) {
+            ctx.strokeStyle = p.c;
+            ctx.lineWidth = p.r;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x, p.y + p.len * p.life);
+            ctx.stroke();
+          } else {
+            if (p.t === SPARK || p.t === EMBER) {
+              ctx.strokeStyle = p.c;
+              ctx.lineWidth = Math.max(0.5, p.r * 0.8 * p.life);
+              ctx.beginPath();
+              ctx.moveTo(p.px, p.py); ctx.lineTo(p.x, p.y); ctx.stroke();
+            }
+            ctx.fillStyle = p.c;
+            var rr = p.r * (0.45 + p.life * 0.55);
+            ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, 6.28318); ctx.fill();
+            if (p.t === EMBER) {
+              ctx.globalAlpha = a * 0.25;
+              ctx.beginPath(); ctx.arc(p.x, p.y, rr * 2.4, 0, 6.28318); ctx.fill();
+            }
+          }
         }
         ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "source-over";
         if (parts.length) raf = requestAnimationFrame(tick);
         else ctx.clearRect(0, 0, W, H);
       }
       function wake() { if (!raf) raf = requestAnimationFrame(tick); }
 
-      /* click / tap — burst right under the pointer */
+      /* click — burst + shock ring + a couple of stars */
       document.addEventListener("click", function (ev) {
-        spawn(ev.clientX, ev.clientY, 12, 2.3, 0.5);
-        wake();
-      }, { passive: true });
-      document.addEventListener("touchstart", function (ev) {
-        var t = ev.touches && ev.touches[0];
-        if (t) { spawn(t.clientX, t.clientY, 10, 2.1, 0.4); wake(); }
+        spark(ev.clientX, ev.clientY, 20, 2.6, 0.55);
+        ring(ev.clientX, ev.clientY);
+        star(ev.clientX, ev.clientY, 2);
+        cap(); wake();
       }, { passive: true });
 
-      /* key presses — small sparks along the focused element's edge */
+      /* tap — ripple + sparks */
+      document.addEventListener("touchstart", function (ev) {
+        var t = ev.touches && ev.touches[0];
+        if (!t) return;
+        spark(t.clientX, t.clientY, 14, 2.2, 0.45);
+        ring(t.clientX, t.clientY);
+        star(t.clientX, t.clientY, 1);
+        cap(); wake();
+      }, { passive: true });
+
+      /* key press — sparks (+ occasional star) from the focused element */
       document.addEventListener("keydown", function (ev) {
         if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
         var el = ev.target;
@@ -146,34 +233,80 @@
         var x, y;
         if (r && r.width > 2) { x = r.left + Math.random() * r.width; y = r.bottom - 2; }
         else { x = W / 2 + (Math.random() - 0.5) * 240; y = H * 0.55; }
-        spawn(x, y, 3, 1.1, 1.7);
-        wake();
+        spark(x, y, 5, 1.2, 1.8);
+        if (Math.random() < 0.3) star(x, y, 1);
+        cap(); wake();
       }, { passive: true });
 
-      /* scrolling — occasional embers rising from the bottom edge */
+      /* scroll — flickering embers rise from the bottom edge, occasional
+         streaks shoot up the side rails */
       var lastSpark = 0;
       window.addEventListener("scroll", function () {
         var now = Date.now();
-        if (now - lastSpark < 150) return;
+        if (now - lastSpark < 110) return;
         lastSpark = now;
-        spawn(Math.random() * W, H - 6, 2, 0.7, 1.9);
-        wake();
+        var n = 2 + (Math.random() * 3 | 0);
+        for (var i = 0; i < n; i++) ember(Math.random() * W, H - Math.random() * 8);
+        if (Math.random() < 0.22) {
+          var side = Math.random() < 0.5 ? 6 + Math.random() * 26 : W - 6 - Math.random() * 26;
+          streak(side, H * (0.75 + Math.random() * 0.2));
+        }
+        cap(); wake();
       }, { passive: true });
     } catch (e) { /* particles are decorative — never break the page */ }
   })();
 
   /* ------------------------------------------------------------------ *
-   * scroll: collapse header, show back-to-top
+   * scroll: smart header — filters hide when the user scrolls DOWN, come
+   * back instantly on the first upward move. Back-to-top shows far down.
    * ------------------------------------------------------------------ */
 
   var topBtn = $("#kTop");
   var lastScroll = -1;
+  var accScroll = 0;
+  var lastScrollT = 0;
+  var settleT = 0; // until: ignore scroll accumulation (header anim kickback)
+  /* only real user input drives the smart header: wheel, touch, scroll
+     keys or a press (scrollbar drag). Layout drift from lazy images and
+     scroll anchoring fires plain scroll events that carry no gesture —
+     those never flip the bar. */
+  var gestT = 0;
+  function armGesture() { gestT = Date.now(); }
+  window.addEventListener("wheel", armGesture, { passive: true, capture: true });
+  window.addEventListener("touchmove", armGesture, { passive: true, capture: true });
+  window.addEventListener("pointerdown", armGesture, { passive: true, capture: true });
+  window.addEventListener("keydown", function (ev) {
+    if (["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "].indexOf(ev.key) !== -1) armGesture();
+  }, { passive: true, capture: true });
+
   function onScroll() {
     var y = window.scrollY || document.documentElement.scrollTop || 0;
     if (y === lastScroll) return;
+    var dy = y - lastScroll;
     lastScroll = y;
-    document.body.classList.toggle("k-scrolled", y > 140);
     if (topBtn) topBtn.classList.toggle("show", y > 480);
+    /* right after a hide/show toggle the header animation itself shifts
+       the content and scroll anchoring kicks scrollTop back — that
+       kickback must not feed the accumulator (it would oscillate) */
+    if (Date.now() < settleT) { accScroll = 0; return; }
+    /* no recent user gesture → this is layout drift, not scrolling */
+    if (Date.now() - gestT > 700) { accScroll = 0; return; }
+    var now = Date.now();
+    if (now - lastScrollT > 250) accScroll = 0; // a pause starts a fresh gesture
+    lastScrollT = now;
+    if (accScroll !== 0 && (accScroll > 0) !== (dy > 0)) accScroll = 0; // direction change restarts
+    accScroll += dy;
+    if (accScroll > 48 && y > 130) {
+      document.body.classList.add("k-scrolled");
+      accScroll = 0;
+      settleT = now + 500;
+    } else if (accScroll < -48 || y < 100) {
+      document.body.classList.remove("k-scrolled");
+      accScroll = 0;
+      settleT = now + 500;
+    } else if (accScroll > 300 || accScroll < -300) {
+      accScroll = 0;
+    }
   }
   window.addEventListener("scroll", function () {
     window.requestAnimationFrame(onScroll);
@@ -431,17 +564,68 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * custom dropdowns — styled menus, never the browser default
+   * custom dropdowns — styled menus, never the browser default.
+   * The open menu is PORTALED to <body> with position:fixed, so it can
+   * never be clipped by the settings modal's overflow or any scroll
+   * container (the old absolute menus were cut off inside the popup).
    * ------------------------------------------------------------------ */
+
+  function floatMenu(dd, btn, menu) {
+    if (menu.parentNode !== document.body) {
+      document.body.appendChild(menu);
+      menu.classList.add("k-dd-float");
+    }
+    menu._kdd = dd;
+    menu.hidden = false;
+    menu.style.maxHeight = ""; // natural height first, clamp only if needed
+    var r = btn.getBoundingClientRect();
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var mw = menu.offsetWidth || 240, mh = menu.offsetHeight || 200;
+    var top = r.bottom + 7;
+    if (top + mh > vh - 10) {
+      var up = r.top - 7 - mh;
+      if (up >= 10) {
+        top = up; // flip: enough room above the button
+      } else {
+        // neither side fits fully — anchor below and scroll inside
+        top = Math.max(10, Math.min(top, vh - 190));
+        menu.style.maxHeight = Math.max(170, vh - top - 14) + "px";
+      }
+    }
+    var left = Math.max(8, Math.min(r.left, vw - mw - 8));
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top = Math.round(top) + "px";
+  }
+
+  function unfloatMenu(dd, menu) {
+    if (menu.parentNode !== dd) {
+      dd.appendChild(menu);
+      menu.classList.remove("k-dd-float");
+      menu.style.left = "";
+      menu.style.top = "";
+      menu.style.maxHeight = "";
+    }
+    menu.hidden = true;
+  }
 
   function closeAllDds(except) {
     $$(".k-dd.open").forEach(function (dd) {
       if (dd === except) return;
       dd.classList.remove("open");
       var m = $(".k-dd-menu", dd);
-      if (m) m.hidden = true;
+      if (m) unfloatMenu(dd, m);
       var b = $(".k-dd-btn", dd);
       if (b) b.setAttribute("aria-expanded", "false");
+    });
+    /* portaled menus that live on <body> right now */
+    $$("body > .k-dd-menu.k-dd-float").forEach(function (m) {
+      var dd = m._kdd;
+      if (dd && dd !== except) {
+        dd.classList.remove("open");
+        unfloatMenu(dd, m);
+        var b = $(".k-dd-btn", dd);
+        if (b) b.setAttribute("aria-expanded", "false");
+      }
     });
   }
 
@@ -452,19 +636,30 @@
       var menu = $(".k-dd-menu", dd);
       var willOpen = menu.hidden;
       closeAllDds(dd);
-      menu.hidden = !willOpen;
-      dd.classList.toggle("open", willOpen);
-      btn.setAttribute("aria-expanded", String(willOpen));
+      if (willOpen) {
+        floatMenu(dd, btn, menu);
+        dd.classList.add("open");
+        btn.setAttribute("aria-expanded", "true");
+      } else {
+        unfloatMenu(dd, menu);
+        dd.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+      }
       ev.preventDefault();
       return;
     }
     var opt = ev.target.closest ? ev.target.closest(".k-dd-opt") : null;
     if (opt) {
-      var dd2 = opt.closest(".k-dd");
+      var menu2 = opt.closest(".k-dd-menu");
+      var dd2 = (menu2 && menu2._kdd) || opt.closest(".k-dd");
+      if (!dd2) return;
       var val = opt.getAttribute("data-v") || "";
       var lbl = opt.textContent;
       var cur = $(".k-dd-cur", dd2);
       if (cur) cur.textContent = lbl;
+      $$(".k-dd-opt", menu2 || dd2).forEach(function (o) {
+        o.classList.toggle("on", o === opt);
+      });
       closeAllDds();
       if (dd2.getAttribute("data-nav") === "1") {
         var over = {};
@@ -484,6 +679,10 @@
       if (open) open.focus();
     }
   });
+
+  /* a fixed menu must not dangle while the page moves under it */
+  window.addEventListener("resize", function () { closeAllDds(); }, { passive: true });
+  window.addEventListener("scroll", function () { closeAllDds(); }, { passive: true });
 
   /* ------------------------------------------------------------------ *
    * extras — one piece: image filters + engines + telemetry
@@ -538,6 +737,7 @@
   }
   function closeSettings() {
     if (!setEl) return;
+    closeAllDds();
     setEl.classList.remove("show");
     document.body.classList.remove("k-modal");
     setTimeout(function () { setEl.hidden = true; }, 240);

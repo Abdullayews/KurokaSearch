@@ -8,7 +8,7 @@ use std::time::Duration;
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let page = p.page.max(1);
     let url = format!("https://nyaa.si/?q={}&p={page}", urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://nyaa.si/", &[], Duration::from_secs(12))?;
     if !body.contains("torrent-list") { return Ok(vec![]); }
     let mut out = Vec::new();
     // data rows carry a class (<tr class="default">…); the plain <tr> is the header

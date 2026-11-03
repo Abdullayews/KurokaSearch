@@ -12,7 +12,7 @@ pub fn yahoo_news(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     if p.time == "d" { url.push_str("&age=1d"); }
     else if p.time == "w" { url.push_str("&age=7d"); }
     else if p.time == "m" { url.push_str("&age=1m"); }
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://news.yahoo.com/", &[], Duration::from_secs(12))?;
     if !body.contains("s-title") { return Ok(vec![]); }
     let mut out = Vec::new();
     // every article sits in its own <li class="ov-a…"> block

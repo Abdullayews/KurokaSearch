@@ -15,7 +15,7 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let mut url = format!("https://ahmia.fi/search/?q={}", urlencode(&p.query));
     if page > 1 { url.push_str(&format!("&page={page}")); }
     if !token.is_empty() { url.push('&'); url.push_str(&token); }
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://ahmia.fi/", &[], Duration::from_secs(12))?;
     if body.contains("ahmia-home-logo") {
         return Err("ahmia.fi declined this query".into());
     }
@@ -37,7 +37,7 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
 
 /// name=value of the search form's hidden anti-bot input ("" when absent).
 fn fetch_token() -> Result<String, String> {
-    let home = http_get("https://ahmia.fi/", USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10))?;
+    let home = http_get_browser("https://ahmia.fi/", "", &[], Duration::from_secs(10))?;
     let Some(i) = home.find("type=\"hidden\"") else { return Ok(String::new()) };
     let seg = &home[i..];
     let name = attr(seg, "name").unwrap_or_default();

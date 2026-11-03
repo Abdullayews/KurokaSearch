@@ -235,6 +235,9 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
 
     let bar = search_bar(&BarCtx { q: &p.query, cat, home: false });
     o.push_str(&bar);
+
+    // ---- cats + filters share one collapsing shell (scroll-away anim) ----
+    o.push_str(r#"<div class="k-hdr-sub"><div class="k-hdr-sub-in">"#);
     o.push_str(&cat_tabs(&p.query, cat, &p.language, &p.time, p.safesearch));
 
     // filters row: custom dropdowns (never the browser default) + unified extras
@@ -247,7 +250,7 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
         chevron_svg()));
     o.push_str("</div>");
 
-    o.push_str("</div></header>\n");
+    o.push_str("</div></div></div></header>\n");
 
     // ---- body: results run the full width in ONE column; Extras sits BESIDE
     // them when open. The AI report is a full-width horizontal band in the
@@ -269,7 +272,7 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
             Category::Images => o.push_str(&image_grid(&out.results)),
             Category::Videos => o.push_str(&video_grid(&out.results)),
             Category::Music => o.push_str(&music_grid(&out.results)),
-            Category::Maps => o.push_str(&map_grid(&out.results)),
+            Category::Maps => o.push_str(&map_section(&p.query, &out.results)),
             _ => o.push_str(&web_list(&out.results)),
         }
     }
@@ -479,6 +482,22 @@ fn music_grid(rs: &[SearchResult]) -> String {
     o
 }
 
+fn map_section(query: &str, rs: &[SearchResult]) -> String {
+    // live Google Maps embed for the query — the classic output=embed
+    // endpoint needs no key and renders the interactive map client-side
+    let gq = urlencode(query);
+    let mut o = format!(r#"<section class="k-gmap-wrap">
+  <iframe class="k-gmap" src="https://maps.google.com/maps?q={gq}&amp;output=embed" loading="lazy" referrerpolicy="no-referrer" title="Google Maps — {qt}"></iframe>
+  <div class="k-gmap-bar">
+    <span class="k-gmap-tag">Google Maps</span>
+    <a class="k-gmap-open" href="https://www.google.com/maps/search/?api=1&amp;query={gq}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
+  </div>
+</section>
+"#, qt = esc(query));
+    o.push_str(&map_grid(rs));
+    o
+}
+
 fn map_grid(rs: &[SearchResult]) -> String {
     let mut o = String::from(r#"<div class="k-maps">"#);
     for r in rs {
@@ -487,14 +506,23 @@ fn map_grid(rs: &[SearchResult]) -> String {
             if k == "engine" { continue; }
             meta.push_str(&format!(r#"<span class="k-r-kv"><b>{}</b> {}</span>"#, esc(k), esc(v)));
         }
-        let coords = match (r.lat, r.lon) {
-            (Some(la), Some(lo)) => format!(r#"<span class="k-map-geo">{:.4}, {:.4}</span>"#, la, lo),
-            _ => String::new(),
+        let (coords, gmap_q) = match (r.lat, r.lon) {
+            (Some(la), Some(lo)) => (
+                format!(r#"<span class="k-map-geo">{:.4}, {:.4}</span>"#, la, lo),
+                format!("{:.6},{:.6}", la, lo),
+            ),
+            _ => (String::new(), format!("{} {}", r.title, r.desc)),
         };
+        let gq = urlencode(&gmap_q);
+        let dq = urlencode(&gmap_q);
         o.push_str(&format!(r#"<article class="k-map">
   <a class="k-map-title" href="{}" rel="noopener noreferrer" target="_blank">{}</a>
   <p class="k-map-addr">{}</p>
   <div class="k-r-meta">{meta}{coords}</div>
+  <div class="k-map-act">
+    <a href="https://www.google.com/maps/search/?api=1&amp;query={gq}" target="_blank" rel="noopener noreferrer">Maps</a>
+    <a href="https://www.google.com/maps/dir/?api=1&amp;destination={dq}" target="_blank" rel="noopener noreferrer">Directions</a>
+  </div>
 </article>
 "#, esc(&r.url), esc(&r.title), esc(&r.desc)));
     }

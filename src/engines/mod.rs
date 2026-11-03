@@ -34,6 +34,7 @@ pub mod ddg_media;
 pub mod reddit;
 pub mod deezer;
 pub mod wiby;
+pub mod files_extra;
 
 use crate::engine::{SearchParams, SearchResult};
 
@@ -91,6 +92,15 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "reddit" => reddit::search(p),
         "deezer" => deezer::search(p),
         "wiby" => wiby::search(p),
+        // --- task 22 additions ---
+        "mdn" => it_extra::mdn_search(p),
+        "docker" => it_extra::docker_search(p),
+        "huggingface" => it_extra::hf_search(p),
+        "gitlab" => it_extra::gitlab_search(p),
+        "odysee" => media_extra::odysee_search(p),
+        "archive_audio" => archiveorg::search_audio(p),
+        "gutenberg" => files_extra::gutenberg_search(p),
+        "standardebooks" => files_extra::standardebooks_search(p),
         other => Err(format!("unknown engine: {other}")),
     }
 }
