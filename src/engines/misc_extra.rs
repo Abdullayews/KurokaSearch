@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Extra files / music / social / maps engines:
-//! The Pirate Bay (apibay), Mixcloud, Audius, Lemmy, Photon.
+//! The Pirate Bay (apibay), Mixcloud, Lemmy, Photon.
 
 use crate::engine::*;
 use serde_json::Value;
@@ -101,59 +101,6 @@ pub fn mixcloud_search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         }
     }
     Ok(out)
-}
-
-// ---------------------------------------------------------------------------
-// Audius — decentralized music. Host discovery, then track search.
-// ---------------------------------------------------------------------------
-
-pub fn audius_search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
-    let host = audius_host()?;
-    let url = format!("{host}/v1/tracks/search?query={}&app_name=KurokaSearch&limit=15",
-        urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(12))?;
-    let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
-    let mut out = Vec::new();
-    if let Some(arr) = v.get("data").and_then(|x| x.as_array()) {
-        for it in arr {
-            let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let id = it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            if title.is_empty() || id.is_empty() { continue; }
-            let permalink = it.get("permalink").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let link = format!("https://audius.co{permalink}");
-            let user = it.pointer("/user/name").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let genre = it.get("genre").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let ms = it.get("duration").and_then(|x| x.as_i64()).unwrap_or(0);
-            let release = it.get("release_date").and_then(|x| x.as_str())
-                .or_else(|| it.get("created_at").and_then(|x| x.as_str())).unwrap_or("").to_string();
-            let artwork = it.pointer("/artwork/480x480").and_then(|x| x.as_str())
-                .or_else(|| it.pointer("/artwork/150x150").and_then(|x| x.as_str())).map(|s| s.to_string());
-            let play = it.get("play_count").and_then(|x| x.as_i64()).unwrap_or(0);
-            let mut r = SearchResult::new("music", title, link, user.clone());
-            r.duration = Some(dur_text(ms / 1000));
-            if !release.is_empty() { r.published = Some(release.clone()); }
-            r.publisher = Some(user.clone());
-            r.thumb = artwork;
-            r.preview = Some(format!("{host}/v1/tracks/{id}/stream?app_name=KurokaSearch"));
-            if !genre.is_empty() { r.meta.push(("genre".into(), genre)); }
-            if play > 0 { r.meta.push(("plays".into(), play.to_string())); }
-            if !user.is_empty() { r.meta.push(("by".into(), user)); }
-            r.meta.push(("engine".into(), "audius".into()));
-            out.push(r);
-            if out.len() >= 15 { break; }
-        }
-    }
-    Ok(out)
-}
-
-fn audius_host() -> Result<String, String> {
-    let body = http_get("https://api.audius.co", USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(8))?;
-    let v: Value = serde_json::from_str(&body).map_err(|e| format!("hosts: {e}"))?;
-    v.get("data").and_then(|x| x.as_array())
-        .and_then(|a| a.first())
-        .and_then(|h| h.as_str())
-        .map(|s| s.trim_end_matches('/').to_string())
-        .ok_or_else(|| "no audius host".into())
 }
 
 // ---------------------------------------------------------------------------

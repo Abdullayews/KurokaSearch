@@ -17,9 +17,7 @@ pub mod github;
 pub mod arxiv;
 pub mod crossref;
 pub mod bing_site;
-pub mod knaben;
 pub mod solid;
-pub mod tdl;
 pub mod nyaa;
 pub mod libgen;
 pub mod annas;
@@ -33,7 +31,6 @@ pub mod misc_extra;
 pub mod ddg_media;
 pub mod reddit;
 pub mod deezer;
-pub mod wiby;
 pub mod files_extra;
 
 use crate::engine::{SearchParams, SearchResult};
@@ -57,9 +54,7 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "crossref" => crossref::search(p),
         "bing_files" => bing_site::search_files(p),
         "bing_social" => bing_site::search_social(p),
-        "knaben" => knaben::search(p),
         "solid" => solid::search(p),
-        "tdl" => tdl::search(p),
         "nyaa" => nyaa::search(p),
         "libgen" => libgen::search(p),
         "annas" => annas::search(p),
@@ -67,11 +62,9 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         // --- extras ---
         "ddg" => web_extra::ddg_search(p),
         "ddg_news" => web_extra::ddg_news(p),
-        "marginalia" => web_extra::marginalia_search(p),
         "wikidata" => web_extra::wikidata_search(p),
         "bing_images" => media_extra::bing_images(p),
         "youtube" => media_extra::youtube_search(p),
-        "sepiasearch" => media_extra::sepiasearch(p),
         "yahoo_news" => news_extra::yahoo_news(p),
         "hn" => it_extra::hn_search(p),
         "npm" => it_extra::npm_search(p),
@@ -83,7 +76,6 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "eric" => science_extra::eric_search(p),
         "apibay" => misc_extra::apibay_search(p),
         "mixcloud" => misc_extra::mixcloud_search(p),
-        "audius" => misc_extra::audius_search(p),
         "lemmy" => misc_extra::lemmy_search(p),
         "photon" => misc_extra::photon_search(p),
         // --- task 21 additions ---
@@ -91,7 +83,6 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "ddg_videos" => ddg_media::ddg_videos(p),
         "reddit" => reddit::search(p),
         "deezer" => deezer::search(p),
-        "wiby" => wiby::search(p),
         // --- task 22 additions ---
         "mdn" => it_extra::mdn_search(p),
         "docker" => it_extra::docker_search(p),
@@ -100,7 +91,6 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "odysee" => media_extra::odysee_search(p),
         "archive_audio" => archiveorg::search_audio(p),
         "gutenberg" => files_extra::gutenberg_search(p),
-        "standardebooks" => files_extra::standardebooks_search(p),
         other => Err(format!("unknown engine: {other}")),
     }
 }

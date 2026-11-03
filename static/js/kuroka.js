@@ -36,7 +36,9 @@
   /* ------------------------------------------------------------------ *
    * accent color — the picker lives in Settings → Appearance.
    * accent.js (loaded in <head>) exposes window.__kAcc; here we wire the
-   * UI, persist the choice and tint the favicon. "" = default gold.
+   * UI and persist the choice. "" = default gold. The mascot, the wordmark
+   * and the app icons keep their original artwork — the accent paints the
+   * interface only.
    * ------------------------------------------------------------------ */
 
   var KACC = window.__kAcc || null;
@@ -48,29 +50,10 @@
     return /^[0-9a-fA-F]{6}$/.test(v) ? "#" + v.toLowerCase() : "";
   }
 
-  /* recolor the SVG favicon to match a custom accent (data URI, no request;
-     the favicon has its own dark tile, so always the vivid variant set) */
-  var FAV_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="%S0"/><stop offset=".5" stop-color="%S1"/><stop offset="1" stop-color="%S2"/></linearGradient></defs><rect width="2048" height="2048" rx="369" fill="#0a0a0c"/><g transform="translate(328,1679) scale(0.680)"><path d="M96 0V121H287V1372H96V1493H864V1372H672V827L1305 1372H1145V1493H1702V1372H1503L967 911L1696 121H1843V0H1337L672 725V121H864V0Z" fill="url(#g)"/></g></svg>';
-  var favSaved = null;
-  function tintFavicon(hex) {
-    var links = $$('link[rel="icon"]');
-    if (!links.length) return;
-    if (!favSaved) favSaved = links.map(function (l) { return l.getAttribute("href"); });
-    if (!hex) {
-      links.forEach(function (l, i) { l.setAttribute("href", favSaved[i]); });
-      return;
-    }
-    var r = KACC && KACC.compute ? KACC.compute(hex, false) : null;
-    if (!r) return;
-    var svg = FAV_SVG.replace("%S0", r.gold2).replace("%S1", r.gold).replace("%S2", r.gold3);
-    links.forEach(function (l) { l.setAttribute("href", "data:image/svg+xml," + encodeURIComponent(svg)); });
-  }
-
   function applySavedAccent() {
     var hex = normHex(prefs.accent);
     if (hex === DEFAULT_ACCENT) hex = "";
     if (KACC) KACC.apply(hex, prefs.theme === "light");
-    tintFavicon(hex);
   }
 
   function applyTheme() {
@@ -363,20 +346,49 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * infinite scroll — ALWAYS ON: fetch the next page and append results
+   * infinite scroll — ALWAYS ON: fetch the next page and append results.
+   * Appends item-by-item (not whole containers), drops links already on
+   * screen, silently skips pages that yield nothing new, and shows a small
+   * loader while a batch is in flight. Works for every grid type.
    * ------------------------------------------------------------------ */
 
   (function () {
     var main = $("#kMain");
     if (!main) return;
-    var busy = false, done = false;
+    var cat = main.getAttribute("data-cat") || "all";
+    var ITEM = { images: ".k-img", videos: ".k-vid", music: ".k-mus-card" }[cat] || ".k-r";
+    var CONT = { images: ".k-imgs", videos: ".k-vids", music: ".k-mus" }[cat] || ".k-rs";
+    var cont = $(CONT, main);
+    if (!cont) return;
+
+    var busy = false, done = false, emptyTries = 0;
     var page = parseInt(main.getAttribute("data-page") || "1", 10) || 1;
     var more = main.getAttribute("data-more") === "1";
 
-    function nextLink() {
-      if (!more || page >= 50) return null;
-      return searchUrl({ page: page + 1 });
+    /* an item's link: grid tiles (.k-img, .k-vid) ARE the anchor, list and
+     * card items carry the anchor inside — both must resolve */
+    function itemHref(el) {
+      if (el.tagName === "A") {
+        var h = el.getAttribute("href");
+        if (h) return h;
+      }
+      var a = el.querySelector("a[href]");
+      return a ? a.getAttribute("href") : null;
     }
+
+    /* every result link already on screen — the append dedupe set */
+    var seen = {};
+    $$(ITEM, main).forEach(function (el) {
+      var href = itemHref(el);
+      if (href) seen[href] = true;
+    });
+
+    /* loader pill under the grid */
+    var loader = document.createElement("div");
+    loader.className = "k-more";
+    loader.hidden = true;
+    loader.innerHTML = '<span class="k-more-spin" aria-hidden="true"></span>Loading more…';
+    main.appendChild(loader);
 
     function sentinel() {
       var s = document.createElement("div");
@@ -387,46 +399,60 @@
       return s;
     }
 
-    var sent = sentinel();
-    var io = new IntersectionObserver(function (entries) {
-      if (!entries[0].isIntersecting || busy || done) return;
-      var href = nextLink();
-      if (!href) { done = true; io.disconnect(); return; }
+    function hookDead(els) {
+      (els || []).forEach(function (e) {
+        $$("img[onerror]", e).forEach(function (img) {
+          img.onerror = function () {
+            var card = img.closest(".k-img");
+            if (card) { card.classList.add("k-img-dead"); return; }
+            if (img.closest(".k-vid-thumb") || img.closest(".k-mus-art")) { img.style.display = "none"; return; }
+            img.remove();
+          };
+        });
+      });
+    }
+
+    function load() {
       busy = true;
-      fetch(href, { headers: { "X-Requested-With": "kuroka" } })
+      loader.hidden = false;
+      fetch(searchUrl({ page: page + 1 }), { headers: { "X-Requested-With": "kuroka" } })
         .then(function (r) { return r.text(); })
         .then(function (html) {
           var doc = new DOMParser().parseFromString(html, "text/html");
           var nm = doc.getElementById("kMain");
-          if (!nm || $(".k-nors", nm)) { done = true; return; }
+          if (!nm || $(".k-nors", nm)) {
+            done = true; busy = false; loader.hidden = true; return;
+          }
           var add = [];
-          for (var i = 0; i < nm.children.length; i++) add.push(nm.children[i]);
-          if (!add.length) { done = true; return; }
-          add.forEach(function (el) { main.insertBefore(el, sent); });
+          $$(ITEM, nm).forEach(function (el) {
+            var href = itemHref(el);
+            if (!href || seen[href]) return;
+            seen[href] = true;
+            add.push(el);
+          });
+          add.forEach(function (el) { cont.appendChild(el); });
+          hookDead(add);
           page = parseInt(nm.getAttribute("data-page") || "1", 10) || (page + 1);
           more = nm.getAttribute("data-more") === "1";
-          if (!nextLink()) { done = true; io.disconnect(); }
+          if (add.length) emptyTries = 0; else emptyTries++;
+          if (!more || page >= 50 || emptyTries >= 2) { done = true; }
           busy = false;
-          hookDeadImages(add);
+          loader.hidden = true;
+          check();
         })
-        .catch(function () { busy = false; });
+        .catch(function () { busy = false; loader.hidden = true; });
+    }
+
+    var sent = sentinel();
+    var io = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) check();
     }, { rootMargin: "900px 0px" });
     io.observe(sent);
 
-    function hookDeadImages(els) {
-      els.forEach ? els.forEach(function (e) {
-        $$("img[onerror]", e).forEach(function (img) {
-          // re-arm the onerror fallback for injected nodes
-          img.onerror = function () {
-            var card = img.closest(".k-img");
-            if (card) card.classList.add("k-img-dead");
-          };
-        });
-        // favicons: a failed icon removes itself, the letter avatar shows
-        $$("img.k-fav, .k-ava img", e).forEach(function (img) {
-          img.onerror = function () { img.remove(); };
-        });
-      }) : null;
+    function check() {
+      if (busy || done) return;
+      if (!more || page >= 50) { done = true; io.disconnect(); return; }
+      load();
     }
   })();
 
@@ -945,7 +971,6 @@
   function previewAccent(hex) {
     liveAccent = hex;
     if (KACC) KACC.apply(hex, prefs.theme === "light");
-    tintFavicon(hex);
     markSwatch(hex);
   }
 

@@ -40,9 +40,19 @@ pub fn bing_images(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         let title = v.get("t").and_then(|x| x.as_str()).unwrap_or("").to_string();
         if murl.is_empty() || purl.is_empty() { continue; }
         let display_title = if title.is_empty() { host_of(&purl) } else { title };
+        // Bing's own thumbnail CDN (turl) is fast, reliably up and never
+        // 403s a datacenter IP — the grid shows it, the click opens murl.
+        // True pixel size comes from the detail link (expw/exph), which the
+        // tile also carries — that feeds the size filters and the tile's
+        // aspect-ratio placeholder so lazy tiles never collapse the grid.
+        let thumb = v.get("turl").and_then(|x| x.as_str()).filter(|u| u.starts_with("http"))
+            .map(|u| u.to_string()).unwrap_or_else(|| murl.clone());
+        let (w, h) = tile_dims(tile).unwrap_or((None, None));
         let mut r = SearchResult::new("image", display_title, purl.clone(), clip(&purl, 200));
-        r.img = Some(murl.clone());
-        r.thumb = Some(murl);
+        r.img = Some(murl);
+        r.thumb = Some(thumb);
+        r.width = w;
+        r.height = h;
         r.meta.push(("engine".into(), "bing images".into()));
         out.push(r);
         if out.len() >= 35 { break; }
@@ -56,6 +66,17 @@ fn attr_m(tile: &str) -> Option<String> {
     let rest = &tile[i + 3..];
     let end = rest.find('"')?;
     Some(rest[..end].to_string())
+}
+
+/// `&expw=1200&exph=675` inside the tile's detail link — the real pixels.
+fn tile_dims(tile: &str) -> Option<(Option<u32>, Option<u32>)> {
+    let grab = |key: &str| tile.find(&format!("{key}="))
+        .map(|i| tile[i + key.len() + 1..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+        .and_then(|s| s.parse::<u32>().ok());
+    match (grab("expw"), grab("exph")) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => Some((Some(w), Some(h))),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,47 +190,6 @@ fn text_of(v: &Value, path: &[&str]) -> String {
         return runs.iter().filter_map(|r| r.get("text").and_then(|t| t.as_str())).collect::<String>();
     }
     cur.get("simpleText").and_then(|x| x.as_str()).unwrap_or("").to_string()
-}
-
-// ---------------------------------------------------------------------------
-// PeerTube — SepiaSearch is the official index of public instances.
-// ---------------------------------------------------------------------------
-
-pub fn sepiasearch(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
-    let start = (p.page.max(1) - 1) * 12;
-    let nsfw = if p.safesearch >= 1 { "false" } else { "both" };
-    let url = format!(
-        "https://sepiasearch.org/api/v1/search/videos?search={}&count=12&start={start}&sort=-match&nsfw={nsfw}",
-        urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10))?;
-    let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
-    let mut out = Vec::new();
-    if let Some(arr) = v.get("data").and_then(|x| x.as_array()) {
-        for it in arr {
-            let name = it.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let uuid = it.get("uuid").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            if name.is_empty() || uuid.is_empty() { continue; }
-            let link = format!("https://sepiasearch.org/videos/watch/{uuid}");
-            let channel = it.get("channel").and_then(|c| c.get("displayName")).and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let dur = it.get("duration").and_then(|x| x.as_i64()).unwrap_or(0);
-            let published = it.get("publishedAt").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let epoch = parse_iso8601(&published);
-            if !time_accepts(&p.time, epoch) { continue; }
-            let thumb = it.get("thumbnailPath").and_then(|x| x.as_str())
-                .map(|path| format!("https://sepiasearch.org{path}"));
-            let desc = it.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let mut r = SearchResult::new("video", name, link, clip(&strip_tags(&desc), 240));
-            r.duration = Some(dur_text(dur));
-            r.published = Some(published);
-            r.published_epoch = epoch;
-            r.publisher = Some(channel.clone());
-            r.thumb = thumb;
-            if !channel.is_empty() { r.meta.push(("by".into(), channel)); }
-            out.push(r);
-            if out.len() >= 12 { break; }
-        }
-    }
-    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

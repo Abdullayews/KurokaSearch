@@ -103,7 +103,9 @@ fn handle(req: tiny_http::Request) {
                         let _ = respond(req, 200, Header::from_bytes(&b"Content-Type"[..], ctype.as_bytes()).unwrap(),
                             bytes, Some("public, max-age=604800"));
                     }
-                    Err(_) => text(req, 404, "no icon"),
+                    // a miss is negatively cached server-side and briefly
+                    // cacheable by the browser, so dead icons stop re-firing
+                    Err(_) => text_cache(req, 404, "no icon", "public, max-age=1800"),
                 },
             }
         }
@@ -148,6 +150,11 @@ fn html(req: tiny_http::Request, code: u16, body: String) {
 fn text(req: tiny_http::Request, code: u16, body: &str) {
     let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..]).unwrap();
     let _ = respond(req, code, ct, body.as_bytes().to_vec(), None);
+}
+
+fn text_cache(req: tiny_http::Request, code: u16, body: &str, cache: &str) {
+    let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..]).unwrap();
+    let _ = respond(req, code, ct, body.as_bytes().to_vec(), Some(cache));
 }
 
 fn json_ct() -> Header {
@@ -265,10 +272,12 @@ fn hash64(s: &str) -> u64 {
 
 const CACHE_TTL: u64 = 24 * 3600;
 
-/// 2-slot gate — upstream image CDNs 403 a datacenter IP on parallel bursts.
+/// 6-slot gate — upstream image CDNs 403 a datacenter IP on parallel bursts.
+/// (Per-host serialization below already keeps each single CDN calm; the
+/// global cap just spreads the load across hosts.)
 fn with_img_permit<R>(f: impl FnOnce() -> R) -> R {
     static GATE: std::sync::OnceLock<(std::sync::Mutex<u32>, std::sync::Condvar)> = std::sync::OnceLock::new();
-    let gate = GATE.get_or_init(|| (std::sync::Mutex::new(2u32), std::sync::Condvar::new()));
+    let gate = GATE.get_or_init(|| (std::sync::Mutex::new(6u32), std::sync::Condvar::new()));
     let mut permits = gate.0.lock().unwrap_or_else(|p| p.into_inner());
     while *permits == 0 {
         permits = gate.1.wait(permits).unwrap_or_else(|p| p.into_inner());
@@ -321,14 +330,23 @@ fn fetch_image_cached(u: &str) -> Result<(String, Vec<u8>), String> {
     let _host_lock = host_gate(&host).lock().unwrap_or_else(|p| p.into_inner());
     let fetched = with_img_permit(|| {
         let headers: &[(&str, &str)] = &[("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")];
-        let mut res = engine::http_get_binary(u, engine::USER_AGENT, headers, Duration::from_secs(12));
-        // CDNs occasionally 403 a burst; spaced retries often clear it
-        for delay in [400u64, 1500] {
-            if res.is_ok() { break; }
-            thread::sleep(Duration::from_millis(delay));
-            res = engine::http_get_binary(u, engine::USER_AGENT, headers, Duration::from_secs(12));
+        // Wikimedia CDNs 403/429 generic browser UAs from datacenter IPs but
+        // welcome a self-identifying one — pick the UA per host up front
+        let ua = if host.ends_with("wikimedia.org") || host.ends_with("wikipedia.org")
+            || host.ends_with("wikimediausercontent.org")
+        {
+            engine::CONTACT_UA
+        } else {
+            engine::USER_AGENT
+        };
+        let res = engine::http_get_binary(u, ua, headers, Duration::from_secs(10));
+        // CDNs occasionally 403 a burst; one spaced retry — second attempt
+        // switches to the descriptive UA (some hosts prefer it)
+        if res.is_ok() { res } else {
+            thread::sleep(Duration::from_millis(350));
+            let retry_ua = if ua == engine::USER_AGENT { engine::CONTACT_UA } else { engine::USER_AGENT };
+            engine::http_get_binary(u, retry_ua, headers, Duration::from_secs(10))
         }
-        res
     });
     let (ctype, bytes) = fetched?;
     if !ctype.starts_with("image/") || bytes.is_empty() {
@@ -359,8 +377,11 @@ fn is_proxyable_url(u: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// favicon proxy — real icons for result rows, served cacheable, with a
-// letter-avatar fallback painted by the markup when an icon is missing
+// favicon proxy — a four-step fallback chain so virtually every result row
+// gets its real icon. Positive hits are disk-cached for two weeks; misses
+// are negatively cached for six hours so unknown hosts never hammer the
+// chain on every page load. The letter avatar in the markup is the last
+// resort when the whole chain fails.
 // ---------------------------------------------------------------------------
 
 /// Validate the `d` parameter into a plain public hostname.
@@ -382,31 +403,174 @@ fn favicon_host(d: &str) -> Option<String> {
     Some(host)
 }
 
-/// Fetch `host`'s icon through DuckDuckGo's icon service, with a small
-/// disk cache (same store as the image proxy) so bursts stay friendly.
+/// how long a positively cached icon stays fresh
+const FAV_TTL: u64 = 14 * 86400;
+/// how long a cached miss blocks re-probing
+const FAV_NEG_TTL: u64 = 6 * 3600;
+
+/// favicons are tiny — they get their own wider gate (they must never queue
+/// behind full-size image proxy traffic)
+fn with_fav_permit<R>(f: impl FnOnce() -> R) -> R {
+    static GATE: std::sync::OnceLock<(std::sync::Mutex<u32>, std::sync::Condvar)> = std::sync::OnceLock::new();
+    let gate = GATE.get_or_init(|| (std::sync::Mutex::new(8u32), std::sync::Condvar::new()));
+    let mut permits = gate.0.lock().unwrap_or_else(|p| p.into_inner());
+    while *permits == 0 {
+        permits = gate.1.wait(permits).unwrap_or_else(|p| p.into_inner());
+    }
+    *permits -= 1;
+    drop(permits);
+    let out = f();
+    let mut permits = gate.0.lock().unwrap_or_else(|p| p.into_inner());
+    *permits += 1;
+    gate.1.notify_one();
+    out
+}
+
+/// magic-byte sniff — a "200" from an icon service can still be an HTML
+/// error page; only real image bytes count
+fn looks_like_image(b: &[u8]) -> bool {
+    b.len() >= 8
+        && (b.starts_with(&[0x89, b'P', b'N', b'G'])          // png
+            || b.starts_with(&[0xFF, 0xD8, 0xFF])             // jpeg
+            || b.starts_with(b"GIF8")                         // gif
+            || b.starts_with(&[0x00, 0x00, 0x01, 0x00])       // ico
+            || (b.starts_with(b"RIFF") && b.len() > 11 && &b[8..12] == b"WEBP") // webp
+            || b.starts_with(b"<svg")                         // svg (text)
+            || b.starts_with(b"<?xml"))                       // svg with prolog
+}
+
+fn file_age_secs(p: &std::path::Path) -> Option<u64> {
+    std::fs::metadata(p).ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d.as_secs())
+}
+
+/// Fetch `host`'s icon through the fallback chain:
+///   1. DuckDuckGo's icon service (broad coverage, fast)
+///   2. Google's favicon service (near-total coverage, generic globe for
+///      unknown hosts — still an icon)
+///   3. the site's own /favicon.ico
+///   4. <link rel="icon"> parsed out of the site's HTML
 fn fetch_favicon_cached(host: &str) -> Result<(String, Vec<u8>), String> {
     let dir = cache_dir();
     let key = format!("fav-{:016x}", hash64(host));
     let body_p = dir.join(format!("{key}.body"));
     let meta_p = dir.join(format!("{key}.meta"));
+
+    // cached positive?
     if let (Ok(meta), Ok(body)) = (std::fs::read_to_string(&meta_p), std::fs::read(&body_p)) {
-        if meta.starts_with("image/") && !body.is_empty() {
+        let fresh = file_age_secs(&body_p).map(|a| a < FAV_TTL).unwrap_or(false);
+        if meta.starts_with("image/") && !body.is_empty() && fresh && looks_like_image(&body) {
             return Ok((meta, body));
         }
+        // cached miss, still recent enough?
+        if meta == "none" {
+            if file_age_secs(&body_p).map(|a| a < FAV_NEG_TTL).unwrap_or(false) {
+                return Err("cached miss".into());
+            }
+        }
     }
-    let url = format!("https://icons.duckduckgo.com/ip3/{host}.ico");
-    let fetched = with_img_permit(|| {
-        engine::http_get_binary(&url, engine::USER_AGENT,
-            &[("Accept", "image/png,image/webp,image/*,*/*;q=0.8")], Duration::from_secs(8))
+
+    let fetched = with_fav_permit(|| {
+        let accept: &[(&str, &str)] = &[("Accept", "image/png,image/webp,image/*,*/*;q=0.8")];
+        // 1 + 2: the two big icon services
+        for url in [
+            format!("https://icons.duckduckgo.com/ip3/{host}.ico"),
+            format!("https://www.google.com/s2/favicons?domain={host}&sz=64"),
+        ] {
+            if let Ok((ct, b)) = engine::http_get_binary(&url, engine::USER_AGENT, accept, Duration::from_secs(6)) {
+                if ct.starts_with("image/") && !b.is_empty() && looks_like_image(&b) {
+                    return Ok((ct, b));
+                }
+            }
+        }
+        // 3: the site's own favicon.ico
+        if let Ok((ct, b)) = engine::http_get_binary(&format!("https://{host}/favicon.ico"),
+            engine::USER_AGENT, accept, Duration::from_secs(6))
+        {
+            if ct.starts_with("image/") && !b.is_empty() && looks_like_image(&b) {
+                return Ok((ct, b));
+            }
+        }
+        // 4: <link rel="icon"> out of the site's HTML
+        if let Some(u) = icon_from_html(host) {
+            if let Ok((ct, b)) = engine::http_get_binary(&u, engine::USER_AGENT, accept, Duration::from_secs(6)) {
+                if ct.starts_with("image/") && !b.is_empty() && looks_like_image(&b) {
+                    return Ok((ct, b));
+                }
+            }
+        }
+        Err("no icon found".to_string())
     });
-    let (ctype, bytes) = fetched?;
-    if !ctype.starts_with("image/") || bytes.is_empty() {
-        return Err(format!("not an image ({ctype})"));
-    }
+
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(&meta_p, &ctype);
-    let _ = std::fs::write(&body_p, &bytes);
-    Ok((ctype, bytes))
+    match fetched {
+        Ok((ct, b)) => {
+            let _ = std::fs::write(&meta_p, &ct);
+            let _ = std::fs::write(&body_p, &b);
+            Ok((ct, b))
+        }
+        Err(e) => {
+            // negative marker: meta "none", mtime = now
+            let _ = std::fs::write(&meta_p, "none");
+            let _ = std::fs::write(&body_p, b"");
+            // rewriting the file refreshes its mtime — that IS the timer
+            Err(e)
+        }
+    }
+}
+
+/// Extract a `<link rel="…icon…" href="…">` URL from the site's landing
+/// page and absolutize it against `https://host`.
+fn icon_from_html(host: &str) -> Option<String> {
+    let body = engine::http_get_browser(&format!("https://{host}/"), "",
+        &[("Accept", "text/html,application/xhtml+xml")], Duration::from_secs(6)).ok()?;
+    let lower = body.to_ascii_lowercase();
+    let mut probe = 0usize;
+    while let Some(rel) = lower[probe..].find("<link") {
+        let start = probe + rel;
+        let end = lower[start..].find('>').map(|e| start + e).unwrap_or(lower.len());
+        let tag = &lower[start..end];
+        if tag.contains("rel=\"icon") || tag.contains("rel=\"shortcut icon")
+            || tag.contains("rel='icon") || tag.contains("rel='shortcut icon")
+            || tag.contains("rel=\"apple-touch-icon")
+        {
+            if let Some(h) = attr_href(&body[start..end]) {
+                let u = if h.starts_with("http") {
+                    h
+                } else if h.starts_with("//") {
+                    format!("https:{h}")
+                } else if let Some(stripped) = h.strip_prefix('/') {
+                    format!("https://{host}/{stripped}")
+                } else {
+                    format!("https://{host}/{h}")
+                };
+                return Some(u);
+            }
+        }
+        probe = end + 1;
+        if probe >= lower.len() { break; }
+    }
+    None
+}
+
+/// href="…" value of the first <link> tag in `chunk` (case-tolerant).
+fn attr_href(chunk: &str) -> Option<String> {
+    let lower = chunk.to_ascii_lowercase();
+    let i = lower.find("href")?;
+    let rest = chunk[i + 4..].trim_start();
+    let rest = rest.strip_prefix('=')?;
+    let rest = rest.trim_start();
+    let q = rest.chars().next()?;
+    if q != '"' && q != '\'' { return None; }
+    let end = rest[1..].find(q)?;
+    Some(html_unescape(&rest[1..1 + end]))
+}
+
+fn html_unescape(s: &str) -> String {
+    s.replace("&amp;", "&").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">")
 }
 
 // ---------------------------------------------------------------------------

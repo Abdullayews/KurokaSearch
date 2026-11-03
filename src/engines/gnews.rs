@@ -5,22 +5,18 @@ use crate::engine::*;
 use std::time::Duration;
 
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
-    let first = (p.page.saturating_sub(1)) * 10 + 1;
     let mut q = p.query.clone();
     if !p.time.is_empty() {
         let op = match p.time.as_str() { "d" => "1d", "w" => "7d", "m" => "1m", _ => "1y" };
         q.push_str(&format!(" when:{op}"));
     }
     let (hl, gl, ceid) = gnews_locale(&p.language);
+    // Google News RSS has no real paging — this engine is registry-flagged
+    // paged=false and only ever serves the first page
     let mut url = format!(
         "https://news.google.com/rss/search?q={}&hl={hl}&gl={gl}&ceid={ceid}",
         urlencode(&q)
     );
-    if p.page > 1 {
-        // Google News RSS does not really page; nudge with start is ignored,
-        // so deeper pages are served by bing_news only.
-        url.push_str(&format!("&start={first}"));
-    }
     if p.safesearch == 2 { url.push_str("&safe=active"); }
     let body = http_get(&url, USER_AGENT, &[("Accept", "application/rss+xml")], Duration::from_secs(12))?;
     let mut out = Vec::new();

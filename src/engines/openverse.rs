@@ -3,6 +3,7 @@
 
 use crate::engine::*;
 use serde_json::Value;
+use std::thread;
 use std::time::Duration;
 
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
@@ -15,7 +16,17 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     if p.safesearch == 0 {
         url.push_str("&mature=true");
     }
-    let body = http_get(&url, CONTACT_UA, &[("Accept", "application/json")], Duration::from_secs(12))?;
+    // Openverse's edge is burst-flaky from datacenters — one spaced retry
+    // turns most first-packet losses into hits
+    let mut body = None;
+    for attempt in 0..2 {
+        match http_get(&url, CONTACT_UA, &[("Accept", "application/json")], Duration::from_secs(10)) {
+            Ok(b) => { body = Some(b); break; }
+            Err(_) if attempt == 0 => { thread::sleep(Duration::from_millis(600)); continue; }
+            Err(e) => return Err(e),
+        }
+    }
+    let body = body.ok_or_else(|| "openverse unreachable".to_string())?;
     let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
     let mut out = Vec::new();
     if let Some(results) = v.get("results").and_then(|x| x.as_array()) {
