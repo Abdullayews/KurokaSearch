@@ -37,7 +37,7 @@ fn fetch_vqd(query: &str) -> Result<String, String> {
     // one retry — DDG's edge is burst-flaky towards datacenter IPs
     let mut last: Option<String> = None;
     for attempt in 0..2 {
-        match http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10)) {
+        match http_get_ddg(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10)) {
             Ok(body) => {
                 if let Some(vqd) = extract_vqd(&body) { return Ok(vqd); }
                 last = Some("vqd token not found".into());
@@ -83,7 +83,7 @@ pub fn ddg_images(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         ddg_locale(&p.language), urlencode(&p.query), p.page.max(1));
     let headers = xhr_headers(&referer);
     let extra: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let body = http_get(&url, USER_AGENT, &extra, Duration::from_secs(12))?;
+    let body = http_get_ddg(&url, USER_AGENT, &extra, Duration::from_secs(12))?;
     if body.contains("\"challenge\"") {
         return Err("bot challenge (rate limited)".into());
     }
@@ -124,7 +124,7 @@ pub fn ddg_videos(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         ddg_locale(&p.language), urlencode(&p.query), p.page.max(1));
     let headers = xhr_headers(&referer);
     let extra: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let body = http_get(&url, USER_AGENT, &extra, Duration::from_secs(12))?;
+    let body = http_get_ddg(&url, USER_AGENT, &extra, Duration::from_secs(12))?;
     if body.contains("\"challenge\"") {
         return Err("bot challenge (rate limited)".into());
     }

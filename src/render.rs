@@ -227,9 +227,9 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
     let title = if p.query.is_empty() { "Kuroka".to_string() } else { format!("{} — Kuroka", p.query) };
     let mut o = layout_open(&title, &format!("Search results for {}", p.query), "k-page-results");
 
-    // ---- sticky header: banner brand left, core center ----
+    // ---- sticky header: brand wordmark left (user-supplied art), core center ----
     o.push_str(&format!(r#"<header class="k-hdr" id="kHdr">
-  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/banner-head.png" alt="Kuroka" width="544" height="132"></a>
+  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/wordmark.webp" alt="Kuroka" width="1003" height="249"></a>
   <div class="k-hdr-core">
 "#));
 
