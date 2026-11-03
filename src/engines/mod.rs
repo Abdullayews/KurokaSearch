@@ -24,6 +24,12 @@ pub mod nyaa;
 pub mod libgen;
 pub mod annas;
 pub mod ahmia;
+pub mod web_extra;
+pub mod media_extra;
+pub mod news_extra;
+pub mod it_extra;
+pub mod science_extra;
+pub mod misc_extra;
 
 use crate::engine::{SearchParams, SearchResult};
 
@@ -53,6 +59,28 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "libgen" => libgen::search(p),
         "annas" => annas::search(p),
         "ahmia" => ahmia::search(p),
+        // --- extras ---
+        "ddg" => web_extra::ddg_search(p),
+        "ddg_news" => web_extra::ddg_news(p),
+        "marginalia" => web_extra::marginalia_search(p),
+        "wikidata" => web_extra::wikidata_search(p),
+        "bing_images" => media_extra::bing_images(p),
+        "youtube" => media_extra::youtube_search(p),
+        "sepiasearch" => media_extra::sepiasearch(p),
+        "yahoo_news" => news_extra::yahoo_news(p),
+        "hn" => it_extra::hn_search(p),
+        "npm" => it_extra::npm_search(p),
+        "crates" => it_extra::crates_search(p),
+        "pubmed" => science_extra::pubmed_search(p),
+        "europepmc" => science_extra::europepmc_search(p),
+        "zenodo" => science_extra::zenodo_search(p),
+        "doaj" => science_extra::doaj_search(p),
+        "eric" => science_extra::eric_search(p),
+        "apibay" => misc_extra::apibay_search(p),
+        "mixcloud" => misc_extra::mixcloud_search(p),
+        "audius" => misc_extra::audius_search(p),
+        "lemmy" => misc_extra::lemmy_search(p),
+        "photon" => misc_extra::photon_search(p),
         other => Err(format!("unknown engine: {other}")),
     }
 }

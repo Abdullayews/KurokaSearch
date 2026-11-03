@@ -163,27 +163,46 @@ pub struct SearchOutcome {
 pub const REGISTRY: &[EngineInfo] = &[
     // all
     EngineInfo { id: "bing", name: "Bing Web", category: "all", default_on: true, paged: true },
+    EngineInfo { id: "ddg", name: "DuckDuckGo", category: "all", default_on: true, paged: true },
     EngineInfo { id: "wikipedia", name: "Wikipedia", category: "all", default_on: true, paged: true },
+    EngineInfo { id: "wikidata", name: "Wikidata", category: "all", default_on: true, paged: true },
+    EngineInfo { id: "marginalia", name: "Marginalia", category: "all", default_on: false, paged: false },
     // images
+    EngineInfo { id: "bing_images", name: "Bing Images", category: "images", default_on: true, paged: true },
     EngineInfo { id: "openverse", name: "Openverse", category: "images", default_on: true, paged: true },
     EngineInfo { id: "commons", name: "Wikimedia Commons", category: "images", default_on: true, paged: true },
     // videos
+    EngineInfo { id: "youtube", name: "YouTube", category: "videos", default_on: true, paged: false },
+    EngineInfo { id: "sepiasearch", name: "PeerTube", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "dailymotion", name: "Dailymotion", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "archiveorg", name: "Internet Archive", category: "videos", default_on: true, paged: true },
     // news
     EngineInfo { id: "gnews", name: "Google News", category: "news", default_on: true, paged: true },
     EngineInfo { id: "bing_news", name: "Bing News", category: "news", default_on: true, paged: true },
+    EngineInfo { id: "ddg_news", name: "DuckDuckGo News", category: "news", default_on: true, paged: true },
+    EngineInfo { id: "yahoo_news", name: "Yahoo News", category: "news", default_on: true, paged: true },
     // maps
     EngineInfo { id: "nominatim", name: "OpenStreetMap", category: "maps", default_on: true, paged: false },
+    EngineInfo { id: "photon", name: "Photon", category: "maps", default_on: true, paged: false },
     // music
     EngineInfo { id: "itunes", name: "Apple Music", category: "music", default_on: true, paged: false },
     EngineInfo { id: "musicbrainz", name: "MusicBrainz", category: "music", default_on: true, paged: true },
+    EngineInfo { id: "mixcloud", name: "Mixcloud", category: "music", default_on: true, paged: true },
+    EngineInfo { id: "audius", name: "Audius", category: "music", default_on: true, paged: true },
     // it
     EngineInfo { id: "stackexchange", name: "Stack Overflow", category: "it", default_on: true, paged: true },
     EngineInfo { id: "github", name: "GitHub", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "hn", name: "Hacker News", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "npm", name: "npm", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "crates", name: "crates.io", category: "it", default_on: true, paged: true },
     // science
     EngineInfo { id: "arxiv", name: "arXiv", category: "science", default_on: true, paged: true },
     EngineInfo { id: "crossref", name: "Crossref", category: "science", default_on: true, paged: true },
+    EngineInfo { id: "pubmed", name: "PubMed", category: "science", default_on: true, paged: false },
+    EngineInfo { id: "europepmc", name: "Europe PMC", category: "science", default_on: true, paged: true },
+    EngineInfo { id: "zenodo", name: "Zenodo", category: "science", default_on: true, paged: true },
+    EngineInfo { id: "doaj", name: "DOAJ", category: "science", default_on: true, paged: true },
+    EngineInfo { id: "eric", name: "ERIC", category: "science", default_on: true, paged: true },
     // files
     EngineInfo { id: "bing_files", name: "Documents (PDF)", category: "files", default_on: false, paged: true },
     EngineInfo { id: "annas", name: "Anna's Archive", category: "files", default_on: true, paged: true },
@@ -192,8 +211,10 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "knaben", name: "Knaben", category: "files", default_on: true, paged: true },
     EngineInfo { id: "solid", name: "SolidTorrents", category: "files", default_on: true, paged: true },
     EngineInfo { id: "tdl", name: "TorrentDownload", category: "files", default_on: true, paged: false },
+    EngineInfo { id: "apibay", name: "The Pirate Bay", category: "files", default_on: true, paged: true },
     // social
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
+    EngineInfo { id: "lemmy", name: "Lemmy", category: "social", default_on: true, paged: true },
     // onion
     EngineInfo { id: "ahmia", name: "Ahmia", category: "onion", default_on: true, paged: true },
 ];
@@ -511,6 +532,81 @@ pub fn avatar_hue(host: &str) -> u16 {
     let mut h: u32 = 5381;
     for b in host.as_bytes() { h = h.wrapping_mul(33).wrapping_add(*b as u32); }
     (h % 360) as u16
+}
+
+/// Percent-decode (for redirect-unwrapping: DDG `uddg=`, Yahoo `RU=`).
+pub fn urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hex = |b: u8| -> Option<u8> {
+                    match b {
+                        b'0'..=b'9' => Some(b - b'0'),
+                        b'a'..=b'f' => Some(b - b'a' + 10),
+                        b'A'..=b'F' => Some(b - b'A' + 10),
+                        _ => None,
+                    }
+                };
+                match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                    (Some(h), Some(l)) => { out.push(h * 16 + l); i += 3; }
+                    _ => { out.push(bytes[i]); i += 1; }
+                }
+            }
+            b'+' => { out.push(b' '); i += 1; }
+            b => { out.push(b); i += 1; }
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// Parse ISO-8601 dates like "2026-11-03T14:46:38Z" (UTC) to epoch seconds.
+pub fn parse_iso8601(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let b = s.as_bytes();
+    if b.len() < 10 { return None; }
+    let num = |r: std::ops::Range<usize>| -> Option<i64> { s.get(r)?.parse().ok() };
+    let y = num(0..4)?;
+    let mo = num(5..7)?;
+    let d = num(8..10)?;
+    let (h, mi, sec) = if b.len() >= 19 {
+        (num(11..13)?, num(14..16)?, num(17..19)?)
+    } else { (0, 0, 0) };
+    Some(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec)
+}
+
+/// Parse relative dates like "2 hours ago", "3 days ago", "1h ago" to epoch.
+pub fn parse_relative(s: &str) -> Option<i64> {
+    let s = s.trim().to_lowercase();
+    let (n_str, unit) = s.split_once([' ', '-'])?;
+    let n: i64 = if n_str == "a" || n_str == "an" || n_str == "1" { 1 } else { n_str.parse().ok()? };
+    let secs = if unit.starts_with("second") || unit.starts_with("sec") || unit == "s" { 1 }
+        else if unit.starts_with("minute") || unit.starts_with("min") || unit == "m" { 60 }
+        else if unit.starts_with("hour") || unit.starts_with("hr") || unit == "h" { 3600 }
+        else if unit.starts_with("day") || unit == "d" { 86400 }
+        else if unit.starts_with("week") || unit.starts_with("wk") || unit == "w" { 7 * 86400 }
+        else if unit.starts_with("month") || unit == "mo" { 30 * 86400 }
+        else if unit.starts_with("year") || unit.starts_with("yr") || unit == "y" { 365 * 86400 }
+        else { return None; };
+    Some(now_epoch() - n * secs)
+}
+
+/// "1.2 GB" style human size from bytes.
+pub fn human_bytes(bytes: i64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut u = 0usize;
+    while v >= 1024.0 && u < units.len() - 1 { v /= 1024.0; u += 1; }
+    if u == 0 { format!("{bytes} B") } else { format!("{v:.1} {}", units[u]) }
+}
+
+/// "6:39" / "1:02:03" duration text from seconds.
+pub fn dur_text(secs: i64) -> String {
+    let secs = secs.max(0);
+    let h = secs / 3600; let m = (secs % 3600) / 60; let s = secs % 60;
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
 }
 
 /// Does an image of w×h match the requested size bucket?

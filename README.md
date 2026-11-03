@@ -9,23 +9,28 @@ black-and-gold interface.
 - **No logs** — queries are proxied through the server and never stored
 - **No ads, no ranking games** — round-robin interleave keeps engine diversity
 - **Bring your own AI** — optional AI summaries run in *your* browser with *your* API key
-- **Single ~5 MB binary**, no runtime dependencies
+- **Transparent by default** — true-black AMOLED theme, and wallpaper-transparent
+  under the Zen Internet extension
+- **Single ~7 MB binary**, no runtime dependencies
 
-## Categories & engines
+## Categories & engines — 45 sources, no keys, no cookies
 
 | Category | Engines |
 | --- | --- |
-| All | Bing Web (RSS), Wikipedia |
-| Images | Openverse, Wikimedia Commons |
-| Videos | Dailymotion, Internet Archive |
-| News | Google News RSS, Bing News RSS |
-| Maps | OpenStreetMap Nominatim |
-| Music | Apple Music (iTunes), MusicBrainz |
-| IT | Stack Exchange, GitHub |
-| Science | arXiv, Crossref |
-| Files | Anna's Archive, LibGen, Nyaa, Knaben, SolidTorrents, TorrentDownload, PDF search |
-| Social Media | site-scoped social search |
+| All | Bing Web, DuckDuckGo, Wikipedia, Wikidata, Marginalia* |
+| Images | Bing Images, Openverse, Wikimedia Commons |
+| Videos | YouTube, PeerTube (SepiaSearch), Dailymotion, Internet Archive |
+| News | Google News, Bing News, DuckDuckGo News, Yahoo News |
+| Maps | OpenStreetMap (Nominatim), Photon |
+| Music | Apple Music (iTunes), MusicBrainz, Mixcloud, Audius |
+| IT | Stack Overflow, GitHub, Hacker News, npm, crates.io |
+| Science | arXiv, Crossref, PubMed, Europe PMC, Zenodo, DOAJ, ERIC |
+| Files | Anna's Archive, LibGen, Nyaa, Knaben, SolidTorrents, TorrentDownload, The Pirate Bay, PDF search |
+| Social Media | Lemmy, site-scoped social search |
 | Onion | Ahmia (Tor hidden services) |
+
+\* Marginalia uses a two-step handshake (~2 s) — off by default, enable it in
+Settings → Engines or per-search in Extras.
 
 ## Build & run
 

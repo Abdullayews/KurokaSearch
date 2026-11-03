@@ -42,6 +42,9 @@ body.k-light {
   --shadow: 0 18px 44px rgba(84, 66, 24, 0.18);
   --glow: 0 0 24px rgba(169, 127, 31, 0.14);
   --hdr-bg: rgba(239, 234, 224, 0.85);
+  /* the light theme is a deliberate user choice — paint its ivory base
+     (the default transparent rule stays away from it) */
+  background-color: #efeae0;
 }
 
 * { box-sizing: border-box; }
@@ -52,15 +55,21 @@ body {
   margin: 0;
   min-height: 100%;
   color: var(--ink);
-  /* The opaque base lives HERE (not in ::before) so a browser-level
-     "transparent background" filter (e.g. Zen Internet wallpaper) can
-     remove it and let the wallpaper show through cleanly. */
-  background-color: var(--bg);
+  /* Transparent BY DEFAULT: browsers with a "make sites transparent"
+     extension (Zen Internet wallpaper mode) get the wallpaper through,
+     while a tiny inline probe adds .k-amoled for everyone else. */
+  background-color: transparent;
   font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/* no transparency extension -> true-black AMOLED base */
+html.k-amoled body:not(.k-light) { background-color: #000; }
+
+/* Zen Internet (or any wallpaper-transparency extension) detected */
+html.k-zen body { background-color: transparent; }
 
 /* ambient backdrop — transparent gold/violet glows only (no opaque fill) */
 body::before {
@@ -81,15 +90,19 @@ body.k-light::before {
 }
 body.k-noglow::before { display: none; }
 
-/* Zen Internet wallpaper mode: strip every opaque background so the
-   browser wallpaper renders behind the glass panels. */
+/* Zen Browser's built-in wallpaper mode: same treatment as the extension.
+   (The extension itself nulls html/body/nav/header/section/main backgrounds
+   with !important — our defaults already survive that, and chrome that must
+   stay readable paints on ::before pseudo-elements, which it cannot touch.) */
 @media (-moz-bool-pref: "zen.view.internet-wallpaper.enabled") {
   html, body { background: transparent !important; }
   body::before { display: none; }
-  .k-hdr { background: rgba(10, 10, 12, 0.42) !important; }
-  .k-foot { background: transparent !important; }
-  .k-toast { background: rgba(20, 19, 26, 0.8) !important; }
 }
+
+/* Zen mode surface tuning: keep the glass readable over any wallpaper */
+html.k-zen .k-hdr::before { background: rgba(10, 10, 14, 0.55); }
+html.k-zen .k-toast { background: rgba(20, 19, 26, 0.85) !important; }
+html.k-zen body::before { opacity: 0.5; }
 
 body.k-modal { overflow: hidden; }
 
@@ -368,7 +381,7 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 8px;
   margin-top: 16px;
   max-width: 100%;
@@ -376,8 +389,6 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
   overscroll-behavior-x: contain;
   scrollbar-width: none;
   padding-bottom: 2px;
-  mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 .k-cats::-webkit-scrollbar { display: none; }
 
@@ -417,10 +428,19 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   padding: 12px 20px;
+  /* the glass lives on a ::before — transparency extensions null the
+     header element itself but cannot touch pseudo-elements */
+}
+.k-hdr::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: linear-gradient(180deg, var(--hdr-bg) 0%, transparent 100%);
   backdrop-filter: blur(20px) saturate(1.5);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
   border-bottom: 1px solid var(--line);
+  pointer-events: none;
 }
 
 .k-brand {
@@ -441,7 +461,7 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
   flex-direction: column;
   align-items: center;
   width: 100%;
-  max-width: 720px;
+  max-width: 920px;
   margin-inline: auto;
 }
 
@@ -462,7 +482,6 @@ body.k-scrolled .k-filters {
   pointer-events: none;
 }
 body.k-scrolled .k-hdr { padding-bottom: 8px; }
-body.k-scrolled .k-extras { display: none; }
 
 /* ==========================================================================
    FILTERS — custom dropdowns / extras (never the browser default)
@@ -577,24 +596,7 @@ body.k-light .k-dd-menu { background: rgba(255, 252, 244, 0.95); }
   box-shadow: var(--glow);
 }
 
-/* ----- extras: ONE piece — filters, engines and telemetry together ----- */
-
-.k-extras {
-  width: min(700px, 100%);
-  margin-top: 10px;
-  padding: 6px 16px 14px;
-  border-radius: var(--r-card);
-  border: 1px solid var(--line);
-  background: var(--glass);
-  backdrop-filter: blur(22px) saturate(1.5);
-  -webkit-backdrop-filter: blur(22px) saturate(1.5);
-  box-shadow: var(--shadow);
-  animation: k-extras-in 0.22s ease-out;
-}
-@keyframes k-extras-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to   { opacity: 1; transform: none; }
-}
+/* ----- extras inner pieces (the panel itself lives beside the results) ----- */
 .k-x-sec { padding: 10px 0; }
 .k-x-sec + .k-x-sec { border-top: 1px solid rgba(230, 180, 69, 0.1); }
 .k-x-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
@@ -666,19 +668,56 @@ body.k-light .k-inf-tbl td { border-bottom-color: rgba(0, 0, 0, 0.06); }
 .k-inf-err { color: var(--err); font-size: 12px; }
 
 /* ==========================================================================
-   MAIN / RESULTS
+   RESULTS BODY — results run the full viewport width; when Extras is
+   open it takes its own column BESIDE them (never on top, never clipped)
    ========================================================================== */
 
-.k-main {
-  max-width: 700px;
-  margin-inline: auto;
-  padding: 22px 16px 100px;
+.k-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
 }
-.k-main[data-cat="images"]  { max-width: 1320px; }
-.k-main[data-cat="videos"]  { max-width: 1160px; }
-.k-main[data-cat="music"]   { max-width: 1160px; }
-.k-main[data-cat="maps"]    { max-width: 760px; }
-.k-main[data-cat="files"]   { max-width: 780px; }
+.k-body:has(> .k-extras:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 348px);
+}
+
+.k-main {
+  width: 100%;
+  min-width: 0;
+  padding: 22px 24px 100px;
+  container-type: inline-size;
+}
+.k-main[data-cat="maps"] { max-width: 900px; }
+
+/* ==========================================================================
+   EXTRAS — side panel (sticky, own scroll, in-flow: blocks nothing)
+   ========================================================================== */
+
+.k-extras {
+  position: sticky;
+  top: 86px;
+  align-self: start;
+  max-height: calc(100dvh - 104px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 22px;
+  margin-right: 20px;
+  padding: 6px 16px 14px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: var(--shadow);
+  animation: k-extras-in 0.25s ease-out;
+  scrollbar-width: thin;
+}
+@keyframes k-extras-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: none; }
+}
+.k-extras::-webkit-scrollbar { width: 8px; }
+.k-extras::-webkit-scrollbar-thumb { background: #26242e; border-radius: 8px; border: 0; }
 
 /* ----- AI report card ----- */
 
@@ -702,6 +741,21 @@ body.k-light .k-inf-tbl td { border-bottom-color: rgba(0, 0, 0, 0.06); }
   box-shadow: var(--glow);
 }
 .k-ai-body { min-width: 0; flex: 1; }
+/* wide results area: text left, Generate button right — no dead space */
+@container (min-width: 900px) {
+  .k-ai-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "head btn" "note btn" "out out";
+    align-items: center;
+    column-gap: 20px;
+    row-gap: 0;
+  }
+  .k-ai-head { grid-area: head; }
+  .k-ai-note { grid-area: note; margin: 6px 0 0; }
+  .k-ai-go { grid-area: btn; }
+  .k-ai-out { grid-area: out; margin-top: 12px; }
+}
 .k-ai-head { font-weight: 700; font-size: 14.5px; }
 .k-ai-prov {
   margin-left: 8px;
@@ -748,7 +802,12 @@ body.k-light .k-inf-tbl td { border-bottom-color: rgba(0, 0, 0, 0.06); }
 
 /* ----- web results ----- */
 
-.k-rs { display: flex; flex-direction: column; gap: 14px; }
+.k-rs { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+/* two columns once the results area itself is wide enough
+   (container query — reacts to Extras opening too) */
+@container (min-width: 900px) {
+  .k-rs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .k-r {
   padding: 16px 18px;
@@ -1360,6 +1419,18 @@ body.k-light .k-set-win { background: rgba(255, 252, 244, 0.94); }
    RESPONSIVE
    ========================================================================== */
 
+/* narrow: extras drops BELOW the results (never covers anything) */
+@media (max-width: 1100px) {
+  .k-body:has(> .k-extras:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .k-extras {
+    position: static;
+    max-height: none;
+    margin: 0 20px 24px;
+  }
+}
+
 @media (max-width: 760px) {
   .k-hdr { padding: 10px 12px; }
   .k-brand img { height: 32px; }
@@ -1374,6 +1445,7 @@ body.k-light .k-set-win { background: rgba(255, 252, 244, 0.94); }
   .k-p-row { grid-template-columns: 1fr; gap: 6px; }
   .k-ai { flex-direction: column; }
   .k-main { padding: 16px 12px 90px; }
+  .k-extras { margin: 0 12px 20px; }
   .k-r-title { font-size: 16.5px; }
   .k-set-body { grid-template-columns: 1fr; }
   .k-set-nav {

@@ -128,16 +128,18 @@ fn layout_open(title: &str, desc: &str, body_class: &str) -> String {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{}</title>
   <meta name="description" content="{}">
-  <meta name="theme-color" content="#0a0a0c">
+  <meta name="theme-color" content="#000000">
   <meta property="og:title" content="{}">
   <meta property="og:description" content="{}">
   <meta property="og:image" content="/static/brand/og-image.png">
   <meta property="og:type" content="website">
   <meta name="referrer" content="no-referrer">
   {}
-  <link rel="stylesheet" href="/static/css/kuroka.css">
+  <link rel="stylesheet" href="/static/css/kuroka.css?v={VERSION}">
 </head>
 <body class="{}">
+<header id="kZenProbe" aria-hidden="true" style="position:fixed;left:-9px;top:-9px;width:1px;height:1px;background-color:#010203;pointer-events:none"></header>
+<script>(function(){{var p=document.getElementById('kZenProbe'),zen=false;try{{var c=getComputedStyle(p).backgroundColor;zen=(c==='rgba(0, 0, 0, 0)'||c==='transparent');}}catch(e){{}}document.documentElement.classList.add(zen?'k-zen':'k-amoled');p.parentNode.removeChild(p);}})();</script>
 "##,
     esc(title), esc(desc), esc(title), esc(desc), favicon_links(), body_class)
 }
@@ -146,7 +148,7 @@ fn layout_close() -> String {
     format!(r#"<button id="kTop" class="k-top" type="button" aria-label="Back to top">{}</button>
 <div id="kToast" class="k-toast" role="status" hidden></div>
 {}
-<script src="/static/js/kuroka.js" defer></script>
+<script src="/static/js/kuroka.js?v={VERSION}" defer></script>
 </body>
 </html>"#, chevron_up_svg(), settings_modal())
 }
@@ -193,7 +195,7 @@ fn search_bar(c: &BarCtx) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn home_page() -> String {
-    let mut o = layout_open("Kuroka — search privately",
+    let mut o = layout_open("Kuroka",
         "KurokaSearch — a privacy-first metasearch engine. No tracking, no logs, no ads.", "k-page-home");
     o.push_str(r#"<main class="k-home">
   <div class="k-home-center">
@@ -232,7 +234,7 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
 
     // ---- sticky header: banner brand left, core center ----
     o.push_str(&format!(r#"<header class="k-hdr" id="kHdr">
-  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/banner-head.png" alt="Kuroka" width="168" height="40"></a>
+  <a class="k-brand" href="/" aria-label="Kuroka home"><img src="/static/brand/banner-head.png" alt="Kuroka" width="172" height="40"></a>
   <div class="k-hdr-core">
 "#));
 
@@ -250,8 +252,33 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
         chevron_svg()));
     o.push_str("</div>");
 
-    // ---- extras: one piece — image filters, engine toggles, engine stats ----
-    o.push_str(r#"<div class="k-extras" id="kExtras" hidden>"#);
+    o.push_str("</div></header>\n");
+
+    // ---- body grid: results full-width + extras beside them when open ----
+    o.push_str(&format!(r#"<div class="k-body"><main class="k-main" id="kMain" data-cat="{cat}" data-q="{}">"#, esc(&p.query)));
+
+    if p.category == Category::All {
+        o.push_str(&ai_card(&p.query, out));
+    }
+
+    if out.results.is_empty() {
+        o.push_str(&no_results(p));
+    } else {
+        match p.category {
+            Category::Images => o.push_str(&image_grid(&out.results)),
+            Category::Videos => o.push_str(&video_grid(&out.results)),
+            Category::Music => o.push_str(&music_grid(&out.results)),
+            Category::Maps => o.push_str(&map_grid(&out.results)),
+            _ => o.push_str(&web_list(&out.results)),
+        }
+        o.push_str(&pagination(out, p));
+    }
+    o.push_str("</main>\n");
+
+    // ---- extras: ONE piece beside the results — image filters, engine
+    // toggles, engine stats. Lives in the grid's side column, so it can
+    // never cover results and never fall off the right edge. ----
+    o.push_str(r#"<aside class="k-extras" id="kExtras" hidden>"#);
     if cat == "images" {
         o.push_str(r#"<div class="k-x-sec k-x-row">"#);
         o.push_str(&format!(r#"<label class="k-x-l">Size {}</label>"#,
@@ -276,30 +303,8 @@ pub fn search_page(out: &SearchOutcome, p: &SearchParams) -> String {
     // engine telemetry lives inside extras — everything extra opens from one place
     o.push_str(&format!(r#"<div class="k-x-sec k-x-stats"><div class="k-x-h">Engines on this search</div>{}</div>"#,
         info_table(out)));
-    o.push_str("</div>");
+    o.push_str("</aside></div>\n");
 
-    o.push_str("</div></header>\n");
-
-    // ---- main results ----
-    o.push_str(&format!(r#"<main class="k-main" id="kMain" data-cat="{cat}" data-q="{}">"#, esc(&p.query)));
-
-    if p.category == Category::All {
-        o.push_str(&ai_card(&p.query, out));
-    }
-
-    if out.results.is_empty() {
-        o.push_str(&no_results(p));
-    } else {
-        match p.category {
-            Category::Images => o.push_str(&image_grid(&out.results)),
-            Category::Videos => o.push_str(&video_grid(&out.results)),
-            Category::Music => o.push_str(&music_grid(&out.results)),
-            Category::Maps => o.push_str(&map_grid(&out.results)),
-            _ => o.push_str(&web_list(&out.results)),
-        }
-        o.push_str(&pagination(out, p));
-    }
-    o.push_str("</main>\n");
     o.push_str(&layout_close());
     o
 }
@@ -327,7 +332,7 @@ fn ai_card(q: &str, out: &SearchOutcome) -> String {
         ctx.push_str(&format!("- {} — {}\n", r.title, r.desc));
     }
     let ctx_json = serde_json::to_string(&clip(&ctx, 6000)).unwrap_or_default();
-    format!(r#"<section class="k-ai" id="kAi">
+    format!(r#"<div class="k-ai" id="kAi">
   <img class="k-ai-ava" src="/static/brand/ai-avatar.png" alt="" width="44" height="44">
   <div class="k-ai-body">
     <div class="k-ai-head">AI Report <span class="k-ai-prov" id="kAiProv">Google Gemini</span></div>
@@ -335,7 +340,7 @@ fn ai_card(q: &str, out: &SearchOutcome) -> String {
     <div class="k-ai-out" id="kAiOut" hidden></div>
     <button class="k-ai-go" id="kAiGo" type="button" data-q="{}" data-ctx="{}">Generate</button>
   </div>
-</section>
+</div>
 "#, esc(q), esc(&ctx_json))
 }
 
@@ -550,6 +555,7 @@ fn settings_modal() -> String {
     o.push_str(&dd("s-dd-ss", "ss", &[("0","Off"),("1","Moderate"),("2","Strict")], "0", false));
     o.push_str(r#"</div>
           <div class="k-p-row"><label for="s-ac">Autocomplete</label><label class="k-switch"><input type="checkbox" id="s-ac"><span class="k-sl"></span></label></div>
+          <div class="k-p-row"><label for="s-inf">Infinite scroll</label><label class="k-switch"><input type="checkbox" id="s-inf"><span class="k-sl"></span></label></div>
           <div class="k-p-row"><label for="s-newtab">Open results in new tab</label><label class="k-switch"><input type="checkbox" id="s-newtab"><span class="k-sl"></span></label></div>
         </section>
         <section class="k-set-pane" data-pane="appearance">
@@ -557,7 +563,7 @@ fn settings_modal() -> String {
     o.push_str(&dd("s-dd-theme", "theme", &[("dark","Dark"),("light","Light")], "dark", false));
     o.push_str(r#"</div>
           <div class="k-p-row"><label for="s-glow">Backdrop glow</label><label class="k-switch"><input type="checkbox" id="s-glow" checked><span class="k-sl"></span></label></div>
-          <p class="k-set-note">On Zen Internet the page background turns transparent automatically when a wallpaper filter is active.</p>
+          <p class="k-set-note">Background is transparent by default: with the Zen Internet extension your wallpaper shows through; without it Kuroka falls back to a true-black AMOLED theme.</p>
         </section>
         <section class="k-set-pane" data-pane="ai">
           <div class="k-p-row"><label for="s-ai-prov">Provider</label>"#);

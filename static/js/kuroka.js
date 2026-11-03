@@ -12,7 +12,7 @@
 
   var PREF_KEY = "kuroka.prefs";
   var DEFAULT_PREFS = {
-    lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true,
+    lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true, inf: false,
     theme: "dark", glow: true, engines: {},
     aiProv: "gemini", aiModel: "", aiKey: "", aiBase: ""
   };
@@ -85,6 +85,76 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }
+
+  /* ------------------------------------------------------------------ *
+   * infinite scroll — fetch the next page and append its results
+   * ------------------------------------------------------------------ */
+
+  (function () {
+    var main = $("#kMain");
+    if (!main || !prefs.inf) return;
+    var busy = false, done = false;
+
+    function nextLink() {
+      var links = $$(".k-pg a", main);
+      for (var i = 0; i < links.length; i++) {
+        if (links[i].textContent.trim() === "Next") return links[i].getAttribute("href");
+      }
+      return null;
+    }
+
+    function sentinel() {
+      var s = document.createElement("div");
+      s.id = "kInfSentinel";
+      s.style.height = "1px";
+      s.setAttribute("aria-hidden", "true");
+      main.appendChild(s);
+      return s;
+    }
+
+    var sent = sentinel();
+    var io = new IntersectionObserver(function (entries) {
+      if (!entries[0].isIntersecting || busy || done) return;
+      var href = nextLink();
+      if (!href) { done = true; io.disconnect(); return; }
+      busy = true;
+      fetch(href, { headers: { "X-Requested-With": "kuroka" } })
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, "text/html");
+          var nm = doc.getElementById("kMain");
+          if (!nm) { done = true; return; }
+          var pgOld = $(".k-pg", main);
+          var add = [];
+          for (var i = 0; i < nm.children.length; i++) {
+            var el = nm.children[i];
+            if (el.classList.contains("k-pg")) continue;
+            if (el.id === "kAi") continue; /* one AI card is enough */
+            add.push(el);
+          }
+          add.forEach(function (el) { main.insertBefore(el, sent); });
+          var pgNew = $(".k-pg", nm);
+          if (pgOld && pgNew) pgOld.parentNode.replaceChild(pgNew, pgOld);
+          if (!nextLink()) { done = true; io.disconnect(); }
+          busy = false;
+          hookDeadImages(add);
+        })
+        .catch(function () { busy = false; });
+    }, { rootMargin: "900px 0px" });
+    io.observe(sent);
+
+    function hookDeadImages(els) {
+      els.forEach ? els.forEach(function (e) {
+        $$("img[onerror]", e).forEach(function (img) {
+          // re-arm the onerror fallback for injected nodes
+          img.onerror = function () {
+            var card = img.closest(".k-img");
+            if (card) card.classList.add("k-img-dead");
+          };
+        });
+      }) : null;
+    }
+  })();
 
   /* ------------------------------------------------------------------ *
    * search URL helpers — keep params, honor saved engine choices
@@ -420,6 +490,7 @@
     var k = $("#s-ai-key"); if (k) k.value = prefs.aiKey || "";
     var b = $("#s-ai-base"); if (b) b.value = prefs.aiBase || "";
     var ac = $("#s-ac"); if (ac) ac.checked = prefs.ac !== false;
+    var inf = $("#s-inf"); if (inf) inf.checked = !!prefs.inf;
     var nt = $("#s-newtab"); if (nt) nt.checked = !!prefs.newtab;
     var gl = $("#s-glow"); if (gl) gl.checked = prefs.glow !== false;
     /* engine toggles */
@@ -468,6 +539,7 @@
         cat: ddValByCur("s-dd-cat") || "all",
         newtab: !!($("#s-newtab") || {}).checked,
         ac: ($("#s-ac") || {}).checked !== false,
+        inf: !!($("#s-inf") || {}).checked,
         theme: ddValByCur("s-dd-theme") || "dark",
         glow: ($("#s-glow") || {}).checked !== false,
         engines: engines,
