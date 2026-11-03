@@ -13,24 +13,29 @@ black-and-gold interface.
   under the Zen Internet extension
 - **Single ~7 MB binary**, no runtime dependencies
 
-## Categories & engines — 45 sources, no keys, no cookies
+## Categories & engines — 51 sources, no keys, no cookies
 
 | Category | Engines |
 | --- | --- |
-| All | Bing Web, DuckDuckGo, Wikipedia, Wikidata, Marginalia* |
-| Images | Bing Images, Openverse, Wikimedia Commons |
-| Videos | YouTube, PeerTube (SepiaSearch), Dailymotion, Internet Archive |
+| All | Google*, Bing Web, DuckDuckGo, Wikipedia, Wikidata |
+| Images | Bing Images, Openverse, Wikimedia Commons, DuckDuckGo Images (off) |
+| Videos | YouTube, DuckDuckGo, Dailymotion, Odysee, Internet Archive |
 | News | Google News, Bing News, DuckDuckGo News, Yahoo News |
-| Maps | OpenStreetMap (Nominatim), Photon |
-| Music | Apple Music (iTunes), MusicBrainz, Mixcloud, Audius |
-| IT | Stack Overflow, GitHub, Hacker News, npm, crates.io |
+| Maps | OpenStreetMap (Nominatim), Photon, live Google Maps embed |
+| Music | Apple Music (iTunes), MusicBrainz, Mixcloud, Archive.org Audio, Deezer (off) |
+| IT | Stack Overflow, GitHub, GitLab, Hacker News, npm, crates.io, MDN, Docker Hub, Hugging Face |
 | Science | arXiv, Crossref, PubMed, Europe PMC, Zenodo, DOAJ, ERIC |
-| Files | Anna's Archive, LibGen, Nyaa, Knaben, SolidTorrents, TorrentDownload, The Pirate Bay, PDF search |
-| Social Media | Lemmy, site-scoped social search |
+| Files | Anna's Archive, LibGen, Nyaa, SolidTorrents, The Pirate Bay, Project Gutenberg, PDF search (off) |
+| Social Media | YouTube, Hacker News, Lemmy, Reddit (off), site-scoped social sweep (x.com, instagram, tiktok, facebook, reddit threads via Bing's index) |
 | Onion | Ahmia (Tor hidden services) |
 
-\* Marginalia uses a two-step handshake (~2 s) — off by default, enable it in
-Settings → Engines or per-search in Extras.
+\* Google Web: Google serves datacenter IPs a "JavaScript required" shell.
+Behind `KUROKA_PROXY` (any residential exit) the same engine parses real
+results; without a proxy it detects the wall once, remembers it for ten
+minutes and fails in 0 ms — never slowing the page down. Google results are
+meanwhile fully live on News (RSS), Videos (YouTube) and Maps (embed).
+Reddit and Deezer are IP-walled in the same way — one toggle in Settings →
+Engines, or `KUROKA_PROXY`, brings them back.
 
 ## Build & run
 
@@ -48,6 +53,8 @@ Open `http://127.0.0.1:3000/` — done. Static assets are served from `./static`
 | --- | --- | --- |
 | `KUROKA_ADDR` | `127.0.0.1:3000` | Listen address |
 | `KUROKA_STATIC` | `./static` | Static asset directory |
+| `KUROKA_CACHE` | `./cache/img` | Image/favicon proxy cache directory |
+| `KUROKA_PROXY` | — | Route ALL engine traffic through an http/https/socks5 proxy (residential exit unblocks Google, Reddit, Deezer) |
 
 ## How it works
 

@@ -74,22 +74,24 @@ html.k-amoled body:not(.k-light) { background-color: #000; }
 /* Zen Internet (or any wallpaper-transparency extension) detected */
 html.k-zen body { background-color: transparent; }
 
-/* ambient backdrop — transparent gold/violet glows only (no opaque fill) */
+/* ambient backdrop — transparent gold/violet glows only (no opaque fill).
+   Slightly richer than before: the page reads as lit from above-left,
+   which also lifts the mascot and the glass panels out of flat black. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(900px 500px at 12% -8%, rgba(var(--gold-rgb), 0.07), transparent 60%),
-    radial-gradient(1000px 600px at 88% -12%, rgba(120, 90, 200, 0.05), transparent 60%),
+    radial-gradient(900px 520px at 12% -8%, rgba(var(--gold-rgb), 0.12), transparent 60%),
+    radial-gradient(1000px 600px at 88% -12%, rgba(120, 90, 200, 0.08), transparent 62%),
     radial-gradient(1400px 900px at 50% 120%, rgba(20, 18, 27, 0.35), transparent 70%);
   pointer-events: none;
 }
 body.k-light::before {
   background:
-    radial-gradient(900px 500px at 12% -8%, rgba(201, 161, 55, 0.12), transparent 60%),
-    radial-gradient(1000px 600px at 88% -12%, rgba(120, 90, 200, 0.06), transparent 60%);
+    radial-gradient(900px 520px at 12% -8%, rgba(201, 161, 55, 0.18), transparent 60%),
+    radial-gradient(1000px 600px at 88% -12%, rgba(120, 90, 200, 0.09), transparent 62%);
 }
 body.k-noglow::before { display: none; }
 
@@ -177,7 +179,8 @@ html { scrollbar-width: thin; scrollbar-color: #2a2833 transparent; }
   -webkit-user-drag: none;
   /* the mascot keeps her original gold artwork whatever accent the user
      picks — the theme color belongs to the interface, not to her */
-  filter: drop-shadow(0 26px 60px rgba(var(--gold-rgb), 0.14));
+  filter: drop-shadow(0 20px 42px rgba(var(--gold-rgb), 0.22))
+          drop-shadow(0 6px 14px rgba(var(--gold-rgb), 0.12));
   animation: k-sway 9s ease-in-out infinite;
   transform-origin: 50% 85%;
   will-change: transform;
@@ -186,16 +189,36 @@ html { scrollbar-width: thin; scrollbar-color: #2a2833 transparent; }
 .k-mascot-glow {
   position: absolute;
   z-index: 1;
-  left: 50%; top: 58%;
-  width: 86%;
+  left: 50%; top: 56%;
+  width: 98%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle,
+  /* two-stop core + wide halo: reads as a real light source behind her
+     instead of a faint tint */
+  background:
+    radial-gradient(circle,
+      rgba(var(--gold-rgb), 0.26) 0%,
+      rgba(var(--gold-rgb), 0.10) 38%,
+      rgba(var(--gold-rgb), 0.04) 58%,
+      transparent 72%);
+  animation: k-breathe-glow 7s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* soft warm floor light under the mascot — grounds the figure */
+.k-mascot-wrap::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 50%; bottom: 4%;
+  width: 72%;
+  height: 16%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center,
     rgba(var(--gold-rgb), 0.16) 0%,
     rgba(var(--gold-rgb), 0.05) 45%,
     transparent 70%);
-  animation: k-breathe-glow 7s ease-in-out infinite;
   pointer-events: none;
 }
 
@@ -418,7 +441,7 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
   padding: 12px 20px;
   /* the glass lives on a ::before — transparency extensions null the
      header element itself but cannot touch pseudo-elements */
-  transition: padding 0.32s ease;
+  transition: padding 0.2s ease;
 }
 .k-hdr::before {
   content: "";
@@ -458,25 +481,26 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
 
 /* scroll-away: categories + filters collapse as one shell. The 1fr→0fr
    grid-rows trick animates real height smoothly (no max-height guessing);
-   opacity, a slight lift and a blur fade make it feel liquid. Hides on
-   scroll-down, springs back on scroll-up (kuroka.js drives the class). */
+   opacity, a slight lift and a blur fade make it feel liquid. Hides at the
+   first pixels of scroll-down (kuroka.js drives the class), springs back
+   on scroll-up — the motion is deliberately quick so results arrive sooner. */
 .k-hdr-sub {
   display: grid;
   grid-template-rows: 1fr;
-  transition: grid-template-rows 0.42s cubic-bezier(0.32, 0.94, 0.35, 1),
-              opacity 0.3s ease;
+  transition: grid-template-rows 0.2s cubic-bezier(0.32, 0.94, 0.35, 1),
+              opacity 0.16s ease;
 }
 .k-hdr-sub-in {
   min-height: 0;
   overflow: hidden;
-  transition: transform 0.42s cubic-bezier(0.32, 0.94, 0.35, 1),
-              filter 0.32s ease;
+  transition: transform 0.2s cubic-bezier(0.32, 0.94, 0.35, 1),
+              filter 0.18s ease;
   transform-origin: 50% 0;
 }
 body.k-scrolled .k-hdr-sub { grid-template-rows: 0fr; opacity: 0; }
 body.k-scrolled .k-hdr-sub-in {
-  transform: translateY(-14px) scale(0.985);
-  filter: blur(5px);
+  transform: translateY(-10px) scale(0.985);
+  filter: blur(4px);
   pointer-events: none;
 }
 body.k-scrolled .k-hdr { padding-bottom: 8px; }
@@ -773,7 +797,10 @@ span.k-inf-err { color: var(--err); font-size: 12px; background: none; box-shado
   width: 42px; height: 42px;
   border-radius: 50%;
   border: 1px solid var(--line-2);
-  box-shadow: var(--glow);
+  box-shadow: var(--glow), 0 0 0 3px rgba(var(--gold-rgb), 0.10);
+  /* the avatar art ships on a deep-violet disk — a hint of light keeps
+     it from reading as a black hole on the dark theme */
+  filter: brightness(1.08) saturate(1.05);
 }
 .k-ai-body { min-width: 0; display: flex; flex-direction: column; }
 .k-ai-head { font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -1317,11 +1344,31 @@ a.k-r-eng:hover { border-color: var(--line-2); }
   align-items: center;
   text-align: center;
   padding: 40px 16px 20px;
+  position: relative;
+}
+/* a warm light behind the sad/error mascot so she never sits on flat
+   darkness — matches the home-page mascot glow */
+.k-nors::before, .k-err::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 44px;
+  width: min(340px, 64vw);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    rgba(var(--gold-rgb), 0.20) 0%,
+    rgba(var(--gold-rgb), 0.07) 42%,
+    transparent 68%);
+  pointer-events: none;
 }
 .k-nors-img, .k-err-img {
+  position: relative;
   width: min(220px, 42vw);
   height: auto;
-  filter: drop-shadow(0 18px 44px rgba(var(--gold-rgb), 0.12));
+  filter: drop-shadow(0 18px 44px rgba(var(--gold-rgb), 0.20))
+          drop-shadow(0 5px 12px rgba(var(--gold-rgb), 0.10));
   user-select: none;
   -webkit-user-drag: none;
 }

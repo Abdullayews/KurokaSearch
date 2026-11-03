@@ -2,6 +2,7 @@
 //! Engine implementations. Each module exposes `search(&SearchParams) -> Result<Vec<SearchResult>, String>`.
 
 pub mod bing_web;
+pub mod google;
 pub mod bing_news;
 pub mod gnews;
 pub mod wikipedia;
@@ -37,6 +38,7 @@ use crate::engine::{SearchParams, SearchResult};
 
 pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     match id {
+        "google" => google::search(p),
         "bing" => bing_web::search(p),
         "bing_news" => bing_news::search(p),
         "gnews" => gnews::search(p),

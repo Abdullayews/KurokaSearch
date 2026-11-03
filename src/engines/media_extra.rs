@@ -29,7 +29,20 @@ pub fn bing_images(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let url = format!(
         "https://www.bing.com/images/async?q={}&first={first}&count=35&mmr=1{qft}",
         urlencode(&p.query));
+    // the async endpoint sometimes answers a burst with an empty 200 —
+    // a spaced second attempt (new fingerprint via the UA pool) recovers it
     let body = http_get_browser(&url, "https://www.bing.com/", &[], Duration::from_secs(12))?;
+    let mut out = parse_bing_tiles(&body);
+    if out.is_empty() {
+        std::thread::sleep(Duration::from_millis(450));
+        if let Ok(b2) = http_get_browser(&url, "https://www.bing.com/", &[], Duration::from_secs(12)) {
+            out = parse_bing_tiles(&b2);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_bing_tiles(body: &str) -> Vec<SearchResult> {
     let mut out = Vec::new();
     for tile in body.split(r#"class="iusc""#).skip(1) {
         let Some(mraw) = attr_m(tile) else { continue };
@@ -57,7 +70,7 @@ pub fn bing_images(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         out.push(r);
         if out.len() >= 35 { break; }
     }
-    Ok(out)
+    out
 }
 
 /// the `m="…"` attribute right after an iusc tile
