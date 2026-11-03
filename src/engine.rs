@@ -169,10 +169,12 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "marginalia", name: "Marginalia", category: "all", default_on: false, paged: false },
     // images
     EngineInfo { id: "bing_images", name: "Bing Images", category: "images", default_on: true, paged: true },
+    EngineInfo { id: "ddg_images", name: "DuckDuckGo", category: "images", default_on: true, paged: true },
     EngineInfo { id: "openverse", name: "Openverse", category: "images", default_on: true, paged: true },
     EngineInfo { id: "commons", name: "Wikimedia Commons", category: "images", default_on: true, paged: true },
     // videos
     EngineInfo { id: "youtube", name: "YouTube", category: "videos", default_on: true, paged: false },
+    EngineInfo { id: "ddg_videos", name: "DuckDuckGo", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "sepiasearch", name: "PeerTube", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "dailymotion", name: "Dailymotion", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "archiveorg", name: "Internet Archive", category: "videos", default_on: true, paged: true },
@@ -186,6 +188,7 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "photon", name: "Photon", category: "maps", default_on: true, paged: false },
     // music
     EngineInfo { id: "itunes", name: "Apple Music", category: "music", default_on: true, paged: false },
+    EngineInfo { id: "deezer", name: "Deezer", category: "music", default_on: true, paged: true },
     EngineInfo { id: "musicbrainz", name: "MusicBrainz", category: "music", default_on: true, paged: true },
     EngineInfo { id: "mixcloud", name: "Mixcloud", category: "music", default_on: true, paged: true },
     EngineInfo { id: "audius", name: "Audius", category: "music", default_on: true, paged: true },
@@ -214,6 +217,7 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "apibay", name: "The Pirate Bay", category: "files", default_on: true, paged: true },
     // social
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
+    EngineInfo { id: "reddit", name: "Reddit", category: "social", default_on: true, paged: true },
     EngineInfo { id: "lemmy", name: "Lemmy", category: "social", default_on: true, paged: true },
     // onion
     EngineInfo { id: "ahmia", name: "Ahmia", category: "onion", default_on: true, paged: true },
@@ -385,6 +389,12 @@ pub fn strip_tags(html: &str) -> String {
     decode_entities(&out).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Decode, strip real tags, decode again — for upstream feeds that carry
+/// double-encoded HTML blobs (Google News descriptions embed `&lt;a href=…`).
+pub fn clean_text(s: &str) -> String {
+    decode_entities(&strip_tags(&decode_entities(s)))
+}
+
 pub fn decode_entities(s: &str) -> String {
     // decode to a fixpoint: upstream HTML is sometimes double-encoded
     // (&amp;#039; -> &#039; -> '), so a single pass leaves literal entities
@@ -411,7 +421,10 @@ fn decode_entities_once(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let window = &tail[..tail.len().min(10)];
+        // inspect at most 10 bytes, but never cut inside a multi-byte char
+        let mut end = tail.len().min(10);
+        while end > 0 && !tail.is_char_boundary(end) { end -= 1; }
+        let window = &tail[..end];
         let mut matched = false;
         if let Some(semi) = window.find(';') {
             let ent = &tail[..=semi];
