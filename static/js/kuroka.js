@@ -264,27 +264,15 @@
         cap(); wake();
       }, { passive: true });
 
-      /* scroll — flickering embers rise from the bottom edge, occasional
-         streaks shoot up the side rails */
-      var lastSpark = 0;
-      window.addEventListener("scroll", function () {
-        var now = Date.now();
-        if (now - lastSpark < 110) return;
-        lastSpark = now;
-        var n = 2 + (Math.random() * 3 | 0);
-        for (var i = 0; i < n; i++) ember(Math.random() * W, H - Math.random() * 8);
-        if (Math.random() < 0.22) {
-          var side = Math.random() < 0.5 ? 6 + Math.random() * 26 : W - 6 - Math.random() * 26;
-          streak(side, H * (0.75 + Math.random() * 0.2));
-        }
-        cap(); wake();
-      }, { passive: true });
+      /* scroll particles removed — scrolling stays quiet; clicks, taps and
+         key presses still spark */
     } catch (e) { /* particles are decorative — never break the page */ }
   })();
 
   /* ------------------------------------------------------------------ *
-   * scroll: smart header — filters hide when the user scrolls DOWN, come
-   * back instantly on the first upward move. Back-to-top shows far down.
+   * scroll: smart header — the category/safesearch bar hides at the
+   * FIRST few pixels of downward travel (a light flick is enough) and
+   * springs back on the first upward move. Back-to-top shows far down.
    * ------------------------------------------------------------------ */
 
   var topBtn = $("#kTop");
@@ -318,19 +306,19 @@
     /* no recent user gesture → this is layout drift, not scrolling */
     if (Date.now() - gestT > 700) { accScroll = 0; return; }
     var now = Date.now();
-    if (now - lastScrollT > 250) accScroll = 0; // a pause starts a fresh gesture
+    if (now - lastScrollT > 180) accScroll = 0; // a pause starts a fresh gesture
     lastScrollT = now;
     if (accScroll !== 0 && (accScroll > 0) !== (dy > 0)) accScroll = 0; // direction change restarts
     accScroll += dy;
-    if (accScroll > 48 && y > 130) {
+    if (accScroll > 14 && y > 36) {
       document.body.classList.add("k-scrolled");
       accScroll = 0;
-      settleT = now + 500;
-    } else if (accScroll < -48 || y < 100) {
+      settleT = now + 340;
+    } else if (accScroll < -36 || y < 64) {
       document.body.classList.remove("k-scrolled");
       accScroll = 0;
-      settleT = now + 500;
-    } else if (accScroll > 300 || accScroll < -300) {
+      settleT = now + 340;
+    } else if (accScroll > 240 || accScroll < -240) {
       accScroll = 0;
     }
   }

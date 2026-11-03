@@ -8,19 +8,22 @@ use std::time::Duration;
 
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let page = p.page.max(1);
-    let mut url = format!(
-        "https://api.openverse.org/v1/images/?q={}&page_size=24&page={page}",
+    // anonymous requests are capped at page_size 20 (a 24 now answers
+    // 401 "page_size may not exceed 20 for anonymous requests")
+    let url = format!(
+        "https://api.openverse.org/v1/images/?q={}&page_size=20&page={page}",
         urlencode(&p.query)
     );
-    // safesearch off lets mature content through, default filters it
-    if p.safesearch == 0 {
-        url.push_str("&mature=true");
-    }
+    // NOTE: mature=true needs a registered API key on Openverse — anonymous
+    // requests must not ask for it (the API answers 401), so safesearch
+    // filtering is left to Openverse's own default here.
+    let _ = p.safesearch;
     // Openverse's edge is burst-flaky from datacenters — one spaced retry
-    // turns most first-packet losses into hits
+    // turns most first-packet losses into hits. (Their API now 401s the
+    // descriptive bot UA, so requests go out with a browser UA.)
     let mut body = None;
     for attempt in 0..2 {
-        match http_get(&url, CONTACT_UA, &[("Accept", "application/json")], Duration::from_secs(10)) {
+        match http_get(&url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10)) {
             Ok(b) => { body = Some(b); break; }
             Err(_) if attempt == 0 => { thread::sleep(Duration::from_millis(600)); continue; }
             Err(e) => return Err(e),

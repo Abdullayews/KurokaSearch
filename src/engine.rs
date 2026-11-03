@@ -184,6 +184,7 @@ pub struct SearchOutcome {
 pub const REGISTRY: &[EngineInfo] = &[
     // all — bing's RSS endpoint ignores `first` for datacenter sessions,
     // so it contributes page 1 only (honest paged=false)
+    EngineInfo { id: "google", name: "Google", category: "all", default_on: true, paged: true },
     EngineInfo { id: "bing", name: "Bing Web", category: "all", default_on: true, paged: false },
     EngineInfo { id: "ddg", name: "DuckDuckGo", category: "all", default_on: true, paged: true },
     EngineInfo { id: "wikipedia", name: "Wikipedia", category: "all", default_on: true, paged: true },
@@ -240,8 +241,13 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "solid", name: "SolidTorrents", category: "files", default_on: true, paged: true },
     EngineInfo { id: "apibay", name: "The Pirate Bay", category: "files", default_on: true, paged: true },
     EngineInfo { id: "gutenberg", name: "Project Gutenberg", category: "files", default_on: true, paged: true },
-    // social
+    // social — real platforms first. Reddit is IP-walled server-side (kept
+    // off, one toggle away), so actual-platform coverage here is YouTube,
+    // Hacker News and Lemmy; Bing's index still sweeps the walled gardens
+    // (x.com, instagram, tiktok, facebook, reddit threads) via site: filters
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
+    EngineInfo { id: "youtube", name: "YouTube", category: "social", default_on: true, paged: false },
+    EngineInfo { id: "hn", name: "Hacker News", category: "social", default_on: true, paged: true },
     EngineInfo { id: "reddit", name: "Reddit", category: "social", default_on: false, paged: true },
     EngineInfo { id: "lemmy", name: "Lemmy", category: "social", default_on: true, paged: true },
     // onion
@@ -304,12 +310,12 @@ pub fn run_search(params: &SearchParams) -> SearchOutcome {
     }
     drop(tx);
 
-    let mut heard = 0usize;
-    while heard < spawned.len() {
+    let mut heard_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    while heard_ids.len() < spawned.len() {
         let Some(left) = SEARCH_DEADLINE.checked_sub(started.elapsed()) else { break };
         match rx.recv_timeout(left) {
             Ok((id, name, ms, res)) => {
-                heard += 1;
+                heard_ids.insert(id.clone());
                 match res {
                     Ok(rs) => {
                         outcomes.push(EngineOutcome { id, name, count: rs.len(), time_ms: ms, ok: true, error: None });
@@ -324,8 +330,11 @@ pub fn run_search(params: &SearchParams) -> SearchOutcome {
             Err(_) => break, // deadline reached
         }
     }
-    // engines that never answered within the deadline
-    for (id, name) in spawned.iter().skip(heard) {
+    // engines that never answered within the deadline — matched by id, not
+    // by position (replies arrive out of order, so a positional skip would
+    // blame the wrong engine and hide the real timeout)
+    for (id, name) in spawned.iter() {
+        if heard_ids.contains(id) { continue; }
         outcomes.push(EngineOutcome { id: id.clone(), name: name.clone(), count: 0,
             time_ms: started.elapsed().as_millis() as u64, ok: false,
             error: Some("timed out".into()) });
