@@ -8,7 +8,7 @@ use std::time::Duration;
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let q = urlencode(&p.query.replace('/', " "));
     let url = format!("https://knaben.org/search/{q}/0/{}/0", p.page.max(1));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://knaben.org/", &[], Duration::from_secs(12))?;
     if body.contains("Area 51") { return Err("blocked (area 51)".into()); }
     let mut out = Vec::new();
     for row in body.split("<tr class=\"text-nowrap").skip(1) {
@@ -130,7 +130,7 @@ mod tests {
     #[ignore]
     fn live_knaben() {
         let url = format!("https://knaben.org/search/{}/0/1/0", urlencode(&"ubuntu".replace('/', " ")));
-        let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12)).unwrap();
+        let body = http_get_browser(&url, "https://knaben.org/", &[], Duration::from_secs(12)).unwrap();
         std::fs::write("/tmp/knaben_reqwest.html", &body).unwrap();
         println!("saved {} bytes; rows marker: {}", body.len(), body.matches("<tr class=\"text-nowrap").count());
         match search(&params()) {

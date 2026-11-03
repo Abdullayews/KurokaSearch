@@ -10,6 +10,27 @@ pub const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
 /// Descriptive UA for open APIs that ask for one (Wikimedia & friends).
 pub const CONTACT_UA: &str = "KurokaSearch/3.0 (https://github.com/Abdullayews/KurokaSearch; metasearch; contact: 08abdullayevv@gmail.com)";
 
+/// Rotating browser fingerprints — (user-agent, sec-ch-ua, platform).
+/// Upstream bot checks fingerprint UA vs. client hints, so the pairs must
+/// stay consistent; `http_get_browser` walks them per request.
+pub const UA_POOL: &[(&str, &str, &str)] = &[
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+     "\"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"", "\"Windows\""),
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+     "\"Chromium\";v=\"130\", \"Not_A Brand\";v=\"24\", \"Microsoft Edge\";v=\"130\"", "\"Windows\""),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+     "\"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"", "\"macOS\""),
+    ("Mozilla/5.0 (X11; Linux x86_64; rv=133.0) Gecko/20100101 Firefox/133.0", "", "\"Linux\""),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15", "", "\"macOS\""),
+];
+
+/// Round-robin fingerprint index — spreads requests across the pool so no
+/// single UA gets hammered (and a flagged one rotates out quickly).
+pub fn next_ua() -> usize {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % UA_POOL.len()
+}
+
 // ---------------------------------------------------------------------------
 // models
 // ---------------------------------------------------------------------------
@@ -178,6 +199,7 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "ddg_videos", name: "DuckDuckGo", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "sepiasearch", name: "PeerTube", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "dailymotion", name: "Dailymotion", category: "videos", default_on: true, paged: true },
+    EngineInfo { id: "odysee", name: "Odysee", category: "videos", default_on: true, paged: true },
     EngineInfo { id: "archiveorg", name: "Internet Archive", category: "videos", default_on: true, paged: true },
     // news
     EngineInfo { id: "gnews", name: "Google News", category: "news", default_on: true, paged: true },
@@ -193,12 +215,17 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "musicbrainz", name: "MusicBrainz", category: "music", default_on: true, paged: true },
     EngineInfo { id: "mixcloud", name: "Mixcloud", category: "music", default_on: true, paged: true },
     EngineInfo { id: "audius", name: "Audius", category: "music", default_on: true, paged: true },
+    EngineInfo { id: "archive_audio", name: "Archive Audio", category: "music", default_on: true, paged: true },
     // it
     EngineInfo { id: "stackexchange", name: "Stack Overflow", category: "it", default_on: true, paged: true },
     EngineInfo { id: "github", name: "GitHub", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "gitlab", name: "GitLab", category: "it", default_on: true, paged: true },
     EngineInfo { id: "hn", name: "Hacker News", category: "it", default_on: true, paged: true },
     EngineInfo { id: "npm", name: "npm", category: "it", default_on: true, paged: true },
     EngineInfo { id: "crates", name: "crates.io", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "mdn", name: "MDN Web Docs", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "docker", name: "Docker Hub", category: "it", default_on: true, paged: true },
+    EngineInfo { id: "huggingface", name: "Hugging Face", category: "it", default_on: true, paged: true },
     // science
     EngineInfo { id: "arxiv", name: "arXiv", category: "science", default_on: true, paged: true },
     EngineInfo { id: "crossref", name: "Crossref", category: "science", default_on: true, paged: true },
@@ -216,6 +243,8 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "solid", name: "SolidTorrents", category: "files", default_on: true, paged: true },
     EngineInfo { id: "tdl", name: "TorrentDownload", category: "files", default_on: true, paged: false },
     EngineInfo { id: "apibay", name: "The Pirate Bay", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "gutenberg", name: "Project Gutenberg", category: "files", default_on: true, paged: true },
+    EngineInfo { id: "standardebooks", name: "Standard Ebooks", category: "files", default_on: true, paged: true },
     // social
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
     EngineInfo { id: "reddit", name: "Reddit", category: "social", default_on: false, paged: true },
@@ -317,28 +346,105 @@ fn normalize_url(u: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP helpers (one shared client; HTTP/2 via ALPN keeps CDNs happy)
+// HTTP helpers (one shared client; HTTP/2 via ALPN keeps CDNs happy).
+// The client keeps a cookie jar (many bot checks are really cookie checks)
+// and honors KUROKA_PROXY (http/https/socks5) so any engine can be routed
+// through a residential exit when a datacenter IP gets filtered.
 // ---------------------------------------------------------------------------
 
 fn http_client() -> &'static reqwest::blocking::Client {
     static CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| reqwest::blocking::Client::builder()
-        .gzip(true)
-        .build()
-        .unwrap_or_default())
+    CLIENT.get_or_init(|| {
+        let mut b = reqwest::blocking::Client::builder()
+            .gzip(true)
+            .brotli(true)
+            .cookie_store(true);
+        if let Ok(px) = std::env::var("KUROKA_PROXY") {
+            let px = px.trim().to_string();
+            if !px.is_empty() {
+                if let Ok(p) = reqwest::Proxy::all(&px) { b = b.proxy(p); }
+            }
+        }
+        b.build().unwrap_or_default()
+    })
 }
 
-pub fn http_get(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration) -> Result<String, String> {
+/// Raw fetch: status + body in one go (shared by every variant below).
+fn fetch(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration)
+    -> Result<(u16, String), String> {
     let mut rb = http_client().get(url).timeout(timeout).header("User-Agent", ua);
     for (k, v) in extra { rb = rb.header(*k, *v); }
     match rb.send() {
         Ok(resp) => {
-            let status = resp.status();
-            if !status.is_success() { return Err(format!("http {}", status.as_u16())); }
-            resp.text().map_err(|e| format!("read: {e}"))
+            let status = resp.status().as_u16();
+            resp.text().map(|t| (status, t)).map_err(|e| format!("read: {e}"))
         }
         Err(e) => Err(format!("{e}")),
     }
+}
+
+pub fn http_get(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration) -> Result<String, String> {
+    // every request carries a browser-grade Accept-Language unless the
+    // engine already set one — pure-JSON APIs ignore it, bot walls like it
+    let has_al = extra.iter().any(|(k, _)| k.eq_ignore_ascii_case("accept-language"));
+    let mut headers: Vec<(&str, &str)> = Vec::with_capacity(extra.len() + 1);
+    if !has_al { headers.push(("Accept-Language", "en-US,en;q=0.9")); }
+    for (k, v) in extra { headers.push((k, v)); }
+    let (status, body) = fetch(url, ua, &headers, timeout)?;
+    if !(200..300).contains(&status) { return Err(format!("http {status}")); }
+    Ok(body)
+}
+
+/// Browser-grade GET for HTML scrapers: full navigation header set
+/// (client hints, Sec-Fetch-*, Referer), rotating fingerprints, shared
+/// cookie jar, and one UA-rotating retry when a bot wall answers
+/// 403/429/503. This is the "always open" layer — engines call it instead
+/// of `http_get` whenever the upstream is an HTML page that may probe.
+pub fn http_get_browser(url: &str, referer: &str, extra: &[(&str, &str)], timeout: Duration)
+    -> Result<String, String> {
+    let mut last_err = String::new();
+    for attempt in 0..2 {
+        let idx = next_ua();
+        let (ua, chua, platform) = UA_POOL[idx];
+        let mut headers: Vec<(&str, &str)> = vec![
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
+            ("Accept-Language", "en-US,en;q=0.9"),
+            ("Upgrade-Insecure-Requests", "1"),
+            ("Sec-Fetch-Dest", "document"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Site", "cross-site"),
+            ("Sec-Fetch-User", "?1"),
+        ];
+        if !chua.is_empty() {
+            headers.push(("Sec-CH-UA", chua));
+            headers.push(("Sec-CH-UA-Mobile", "?0"));
+            headers.push(("Sec-CH-UA-Platform", platform));
+        }
+        if !referer.is_empty() { headers.push(("Referer", referer)); }
+        for (k, v) in extra {
+            // caller-supplied headers win over the defaults
+            headers.retain(|(h, _)| !h.eq_ignore_ascii_case(k));
+            headers.push((k, v));
+        }
+        match fetch(url, ua, &headers, timeout) {
+            Ok((status, body)) if (200..300).contains(&status) => return Ok(body),
+            Ok((status, _)) => {
+                last_err = format!("http {status}");
+                if matches!(status, 403 | 429 | 503) && attempt == 0 {
+                    // bot wall — swap fingerprint and try once more
+                    thread::sleep(Duration::from_millis(400 + idx as u64 * 90));
+                    continue;
+                }
+                return Err(last_err);
+            }
+            Err(e) => {
+                last_err = e;
+                if attempt == 0 { thread::sleep(Duration::from_millis(250)); continue; }
+                return Err(last_err);
+            }
+        }
+    }
+    Err(last_err)
 }
 
 /// DuckDuckGo's DNS answer points some datacenter networks at an address
@@ -351,6 +457,8 @@ fn ddg_client() -> &'static reqwest::blocking::Client {
         let pin = "40.114.177.156:443".parse().unwrap();
         reqwest::blocking::Client::builder()
             .gzip(true)
+            .brotli(true)
+            .cookie_store(true)
             .resolve("duckduckgo.com", pin)
             .resolve("html.duckduckgo.com", pin)
             .build()

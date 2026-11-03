@@ -1,6 +1,6 @@
 [package]
 name = "kuroka-search"
-version = "3.4.0"
+version = "3.5.0"
 edition = "2021"
 description = "KurokaSearch — privacy-first metasearch engine, written in Rust"
 license = "AGPL-3.0-or-later"
@@ -9,7 +9,7 @@ repository = "https://github.com/Abdullayews/KurokaSearch"
 
 [dependencies]
 tiny_http = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip", "brotli", "http2", "cookies", "socks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

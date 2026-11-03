@@ -8,7 +8,7 @@ use std::time::Duration;
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let page = p.page.max(1);
     let url = format!("https://solidtorrents.to/search?q={}&page={page}", urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(12))?;
+    let body = http_get_browser(&url, "https://solidtorrents.to/", &[], Duration::from_secs(12))?;
     let mut out = Vec::new();
     for card in body.split("torrent-result-card").skip(1) {
         let Some(href) = find_href(card, "/torrent/") else { continue };

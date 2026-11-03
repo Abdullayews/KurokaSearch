@@ -413,6 +413,7 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
   padding: 12px 20px;
   /* the glass lives on a ::before — transparency extensions null the
      header element itself but cannot touch pseudo-elements */
+  transition: padding 0.32s ease;
 }
 .k-hdr::before {
   content: "";
@@ -450,21 +451,33 @@ body.k-light .k-ac { background: rgba(255, 252, 244, 0.92); }
 
 .k-hdr .k-cats { margin-top: 10px; }
 
-/* scroll-away: categories + filters collapse, search bar stays */
-.k-cats, .k-filters {
-  max-height: 90px;
-  opacity: 1;
-  overflow: hidden;
-  transition: max-height 0.32s ease, opacity 0.24s ease, margin 0.32s ease;
+/* scroll-away: categories + filters collapse as one shell. The 1fr→0fr
+   grid-rows trick animates real height smoothly (no max-height guessing);
+   opacity, a slight lift and a blur fade make it feel liquid. Hides on
+   scroll-down, springs back on scroll-up (kuroka.js drives the class). */
+.k-hdr-sub {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.42s cubic-bezier(0.32, 0.94, 0.35, 1),
+              opacity 0.3s ease;
 }
-body.k-scrolled .k-cats,
-body.k-scrolled .k-filters {
-  max-height: 0;
-  opacity: 0;
-  margin-top: 0;
+.k-hdr-sub-in {
+  min-height: 0;
+  overflow: hidden;
+  transition: transform 0.42s cubic-bezier(0.32, 0.94, 0.35, 1),
+              filter 0.32s ease;
+  transform-origin: 50% 0;
+}
+body.k-scrolled .k-hdr-sub { grid-template-rows: 0fr; opacity: 0; }
+body.k-scrolled .k-hdr-sub-in {
+  transform: translateY(-14px) scale(0.985);
+  filter: blur(5px);
   pointer-events: none;
 }
 body.k-scrolled .k-hdr { padding-bottom: 8px; }
+
+/* while the shell is mid-animation an open menu is portaled to <body>,
+   so nothing inside needs to stay visible */
 
 /* ==========================================================================
    FILTERS — custom dropdowns / extras (never the browser default)
@@ -515,7 +528,7 @@ body.k-scrolled .k-hdr { padding-bottom: 8px; }
   left: 0;
   min-width: 100%;
   max-width: min(300px, 86vw);
-  max-height: 320px;
+  max-height: min(340px, 60vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: 95;
@@ -527,6 +540,19 @@ body.k-scrolled .k-hdr { padding-bottom: 8px; }
   -webkit-backdrop-filter: blur(22px) saturate(1.6);
   box-shadow: var(--shadow), var(--glow);
   animation: k-dd-in 0.16s ease-out;
+}
+/* portaled open menu — fixed to the viewport, above every modal, never
+   clipped by the settings popup or any scroll container. Width is its own
+   content (the base rule's min-width:100% would mean 100% of <body> here) */
+.k-dd-menu.k-dd-float {
+  position: fixed;
+  z-index: 400;
+  top: auto;
+  left: auto;
+  min-width: 248px;
+  width: max-content;
+  max-width: min(320px, 86vw);
+  max-height: min(480px, 70vh); /* show long lists in one piece */
 }
 body.k-light .k-dd-menu { background: rgba(255, 252, 244, 0.95); }
 @keyframes k-dd-in {
@@ -672,7 +698,6 @@ span.k-inf-err { color: var(--err); font-size: 12px; background: none; box-shado
   padding: 22px 24px 100px;
   container-type: inline-size;
 }
-.k-main[data-cat="maps"] { max-width: 900px; }
 
 /* ==========================================================================
    AI REPORT BAND — a full-width horizontal card in the gap between the
@@ -1067,17 +1092,101 @@ a.k-r-eng:hover { border-color: var(--line-2); }
 
 /* ----- maps ----- */
 
-.k-maps { display: flex; flex-direction: column; gap: 18px; }
-.k-map {
-  padding: 6px 2px;
-  border-radius: 0;
-  border: 0;
-  background: none;
+/* Google Maps embed — keyless, interactive, client-side */
+.k-gmap-wrap {
+  position: relative;
+  margin: 0 0 18px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--line);
+  background: var(--glass);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
-.k-map-title { display: block; width: fit-content; color: var(--ink); font-size: 16px; font-weight: 600; }
+.k-gmap {
+  display: block;
+  width: 100%;
+  height: clamp(320px, 48vh, 520px);
+  border: 0;
+  background: #10131a;
+}
+.k-gmap-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.k-gmap-tag {
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: rgba(230, 180, 69, 0.08);
+  color: var(--gold-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.k-gmap-open {
+  margin-left: auto;
+  color: var(--gold);
+  font-size: 13px;
+}
+
+/* location grid — at most SIX cards per row at any width
+   (each column is at least 100%/6 wide, so a 7th can never fit),
+   one column on phones */
+.k-maps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(max(228px, 100% / 6), 1fr));
+  gap: 14px;
+}
+.k-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.3s ease;
+}
+.k-map:hover {
+  border-color: var(--line-2);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow), var(--glow);
+}
+.k-map-title { display: block; width: fit-content; color: var(--ink); font-size: 15.5px; font-weight: 600; line-height: 1.35; }
 .k-map-title:hover { color: var(--gold-2); }
-.k-map-addr { margin: 5px 0 0; font-size: 13.5px; color: var(--mut-2); }
+.k-map-addr { margin: 0; font-size: 13px; color: var(--mut-2); line-height: 1.5; overflow-wrap: anywhere; }
 .k-map-geo { font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.k-map-act {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+.k-map-act a {
+  display: inline-flex;
+  align-items: center;
+  height: 29px;
+  padding: 0 13px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: rgba(230, 180, 69, 0.07);
+  color: var(--gold-2);
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.25s;
+}
+.k-map-act a:hover {
+  border-color: var(--line-2);
+  background: rgba(230, 180, 69, 0.14);
+  box-shadow: var(--glow);
+}
 
 /* ----- action buttons (settings, error page) ----- */
 

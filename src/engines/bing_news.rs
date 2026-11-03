@@ -17,7 +17,7 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     if p.safesearch == 2 {
         url.push_str("&adlt=strict");
     }
-    let body = http_get(&url, USER_AGENT, &[("Accept", "application/rss+xml")], Duration::from_secs(10))?;
+    let body = http_get_browser(&url, "https://www.bing.com/", &[], Duration::from_secs(10))?;
     let mut out = Vec::new();
     for item in body.split("<item>").skip(1) {
         let title = decode_entities(&tag_text(item, "title").unwrap_or_default());
