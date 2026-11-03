@@ -139,6 +139,7 @@ fn layout_open(title: &str, desc: &str, body_class: &str) -> String {
   <meta name="referrer" content="no-referrer">
   {}
   <link rel="stylesheet" href="/static/css/kuroka.css?v={VERSION}">
+  <script src="/static/js/accent.js?v={VERSION}"></script>
 </head>
 <body class="{}">
 <header id="kZenProbe" aria-hidden="true" style="position:fixed;left:-9px;top:-9px;width:1px;height:1px;background-color:#010203;pointer-events:none"></header>
@@ -535,6 +536,12 @@ fn map_grid(rs: &[SearchResult]) -> String {
 // ---------------------------------------------------------------------------
 
 fn settings_modal() -> String {
+    // preset accent swatches (hex, name) — the first one is the default gold
+    const ACCENT_SWATCHES: [(&str, &str); 9] = [
+        ("#e6b445", "Gold — default"), ("#f08c3a", "Amber"), ("#e05d5d", "Crimson"),
+        ("#d95db4", "Magenta"), ("#9a6cf0", "Violet"), ("#5d7de0", "Azure"),
+        ("#3ec4d8", "Cyan"), ("#3ecf8e", "Emerald"), ("#b8c24a", "Lime"),
+    ];
     let mut o = String::from(r#"<div class="k-set" id="kSet" hidden>
   <div class="k-set-bg" id="kSetBg"></div>
   <div class="k-set-win" role="dialog" aria-modal="true" aria-label="Settings">
@@ -575,6 +582,24 @@ fn settings_modal() -> String {
     o.push_str(&dd("s-dd-theme", "theme", &[("dark","Dark"),("light","Light")], "dark", false));
     o.push_str(r#"</div>
           <div class="k-p-row"><label for="s-glow">Backdrop glow</label><label class="k-switch"><input type="checkbox" id="s-glow" checked><span class="k-sl"></span></label></div>
+          <div class="k-p-row k-p-accent"><label for="s-accent-hex">Accent color</label>
+            <div class="k-accent-pick">
+              <div class="k-swatches" role="radiogroup" aria-label="Accent color">"#);
+    for (i, sw) in ACCENT_SWATCHES.iter().enumerate() {
+        o.push_str(&format!(
+            r#"<button type="button" class="k-sw{cls}" data-c="{hex}" style="--sw:{hex}" title="{name}" aria-label="{name}"></button>"#,
+            cls = if i == 0 { " def on" } else { "" },
+            hex = sw.0, name = sw.1));
+    }
+    o.push_str(r#"<label class="k-sw k-sw-custom" title="Custom color" aria-label="Custom color">
+                  <input type="color" id="s-accent">
+                </label>
+              </div>
+              <input type="text" id="s-accent-hex" class="k-p-in k-hex-in" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Accent hex code">
+            </div>
+          </div>
+          <div class="k-accent-bar" aria-hidden="true"></div>
+          <p class="k-set-note">The accent recolors buttons, links, borders, particles, the mascot and the favicon — everywhere. It is stored only in this browser. Empty hex = default gold.</p>
           <p class="k-set-note">Background is transparent by default: with the Zen Internet extension your wallpaper shows through; without it Kuroka falls back to a true-black AMOLED theme.</p>
         </section>
         <section class="k-set-pane" data-pane="ai">

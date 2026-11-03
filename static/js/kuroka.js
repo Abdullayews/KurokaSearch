@@ -13,7 +13,7 @@
   var PREF_KEY = "kuroka.prefs";
   var DEFAULT_PREFS = {
     lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true,
-    theme: "dark", glow: true, engines: {},
+    theme: "dark", glow: true, engines: {}, accent: "",
     aiProv: "gemini", aiModel: "", aiKey: "", aiBase: ""
   };
 
@@ -33,9 +33,50 @@
 
   var prefs = loadPrefs();
 
+  /* ------------------------------------------------------------------ *
+   * accent color — the picker lives in Settings → Appearance.
+   * accent.js (loaded in <head>) exposes window.__kAcc; here we wire the
+   * UI, persist the choice and tint the favicon. "" = default gold.
+   * ------------------------------------------------------------------ */
+
+  var KACC = window.__kAcc || null;
+  var DEFAULT_ACCENT = "#e6b445";
+
+  function normHex(v) {
+    if (typeof v !== "string") return "";
+    v = v.trim().replace(/^#/, "");
+    return /^[0-9a-fA-F]{6}$/.test(v) ? "#" + v.toLowerCase() : "";
+  }
+
+  /* recolor the SVG favicon to match a custom accent (data URI, no request;
+     the favicon has its own dark tile, so always the vivid variant set) */
+  var FAV_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="%S0"/><stop offset=".5" stop-color="%S1"/><stop offset="1" stop-color="%S2"/></linearGradient></defs><rect width="2048" height="2048" rx="369" fill="#0a0a0c"/><g transform="translate(328,1679) scale(0.680)"><path d="M96 0V121H287V1372H96V1493H864V1372H672V827L1305 1372H1145V1493H1702V1372H1503L967 911L1696 121H1843V0H1337L672 725V121H864V0Z" fill="url(#g)"/></g></svg>';
+  var favSaved = null;
+  function tintFavicon(hex) {
+    var links = $$('link[rel="icon"]');
+    if (!links.length) return;
+    if (!favSaved) favSaved = links.map(function (l) { return l.getAttribute("href"); });
+    if (!hex) {
+      links.forEach(function (l, i) { l.setAttribute("href", favSaved[i]); });
+      return;
+    }
+    var r = KACC && KACC.compute ? KACC.compute(hex, false) : null;
+    if (!r) return;
+    var svg = FAV_SVG.replace("%S0", r.gold2).replace("%S1", r.gold).replace("%S2", r.gold3);
+    links.forEach(function (l) { l.setAttribute("href", "data:image/svg+xml," + encodeURIComponent(svg)); });
+  }
+
+  function applySavedAccent() {
+    var hex = normHex(prefs.accent);
+    if (hex === DEFAULT_ACCENT) hex = "";
+    if (KACC) KACC.apply(hex, prefs.theme === "light");
+    tintFavicon(hex);
+  }
+
   function applyTheme() {
     document.body.classList.toggle("k-light", prefs.theme === "light");
     document.body.classList.toggle("k-noglow", prefs.glow === false);
+    applySavedAccent();
   }
   applyTheme();
 
@@ -91,7 +132,9 @@
 
       var parts = [];
       var CAP = 700;
-      var COLORS = ["#e6b445", "#f0c65e", "#d29a2f", "#fff3d6", "#ffd98a", "#f7e6b0"];
+      var COLORS = (window.__kAcc && window.__kAcc.pal()) ||
+        ["#e6b445", "#f0c65e", "#d29a2f", "#fff3d6", "#ffd98a", "#f7e6b0"];
+      if (window.__kAcc) window.__kAcc.watch(function () { COLORS = window.__kAcc.pal(); });
       var SPARK = 0, STAR = 1, RING = 2, EMBER = 3, STREAK = 4;
 
       function rnd(a, b) { return a + Math.random() * (b - a); }
@@ -738,6 +781,8 @@
   function closeSettings() {
     if (!setEl) return;
     closeAllDds();
+    /* revert any live-previewed accent that was not saved */
+    applySavedAccent();
     setEl.classList.remove("show");
     document.body.classList.remove("k-modal");
     setTimeout(function () { setEl.hidden = true; }, 240);
@@ -788,6 +833,7 @@
     var ac = $("#s-ac"); if (ac) ac.checked = prefs.ac !== false;
     var nt = $("#s-newtab"); if (nt) nt.checked = !!prefs.newtab;
     var gl = $("#s-glow"); if (gl) gl.checked = prefs.glow !== false;
+    fillAccentUI(normHex(prefs.accent));
     /* engine toggles */
     $$("input[data-eng]").forEach(function (i) {
       var cat = i.getAttribute("data-cat");
@@ -836,6 +882,7 @@
         ac: ($("#s-ac") || {}).checked !== false,
         theme: ddValByCur("s-dd-theme") || "dark",
         glow: ($("#s-glow") || {}).checked !== false,
+        accent: liveAccent || "",
         engines: engines,
         aiProv: ddValByCur("s-dd-prov") || "gemini",
         aiModel: ($("#s-ai-model") || {}).value || "",
@@ -866,6 +913,77 @@
       try { localStorage.removeItem(PREF_KEY); } catch (e) {}
       toast("Local data cleared");
       setTimeout(function () { window.location.reload(); }, 700);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * accent color picker — swatches, native color input, hex field.
+   * Live preview while open; Save persists; close reverts.
+   * ------------------------------------------------------------------ */
+
+  var liveAccent = "";
+
+  function markSwatch(hex) {
+    var hit = false;
+    $$(".k-sw").forEach(function (s) {
+      if (s.classList.contains("k-sw-custom")) return;
+      var on = !!hex && s.getAttribute("data-c") === hex;
+      s.classList.toggle("on", on);
+      if (on) hit = true;
+    });
+    var cu = $(".k-sw-custom");
+    if (cu) cu.classList.toggle("on", !!hex && !hit);
+  }
+
+  function fillAccentUI(hex) {
+    liveAccent = hex || "";
+    var ci = $("#s-accent"); if (ci) ci.value = hex || DEFAULT_ACCENT;
+    var hx = $("#s-accent-hex"); if (hx) { hx.value = hex || ""; hx.classList.remove("bad"); }
+    markSwatch(hex || "");
+  }
+
+  function previewAccent(hex) {
+    liveAccent = hex;
+    if (KACC) KACC.apply(hex, prefs.theme === "light");
+    tintFavicon(hex);
+    markSwatch(hex);
+  }
+
+  function setAccentInputs(hex) {
+    var ci = $("#s-accent"); if (ci) ci.value = hex || DEFAULT_ACCENT;
+    var hx = $("#s-accent-hex");
+    if (hx) { hx.value = hex || ""; hx.classList.remove("bad"); }
+  }
+
+  $$(".k-sw").forEach(function (s) {
+    if (s.classList.contains("k-sw-custom")) return;
+    s.addEventListener("click", function () {
+      var hex = s.getAttribute("data-c") || DEFAULT_ACCENT;
+      previewAccent(hex === DEFAULT_ACCENT ? "" : hex);
+      setAccentInputs(hex === DEFAULT_ACCENT ? "" : hex);
+    });
+  });
+
+  var accInput = $("#s-accent");
+  if (accInput) {
+    accInput.addEventListener("input", function () {
+      var hex = normHex(accInput.value);
+      if (!hex) return;
+      previewAccent(hex === DEFAULT_ACCENT ? "" : hex);
+      setAccentInputs(hex === DEFAULT_ACCENT ? "" : hex);
+    });
+  }
+
+  var accHex = $("#s-accent-hex");
+  if (accHex) {
+    accHex.addEventListener("input", function () {
+      var v = accHex.value.trim();
+      if (v === "") { accHex.classList.remove("bad"); previewAccent(""); return; }
+      var hex = normHex(v);
+      if (!hex) { accHex.classList.add("bad"); return; }
+      accHex.classList.remove("bad");
+      previewAccent(hex === DEFAULT_ACCENT ? "" : hex);
+      setAccentInputs(hex === DEFAULT_ACCENT ? "" : hex);
     });
   }
 
