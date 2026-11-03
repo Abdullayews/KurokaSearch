@@ -5,31 +5,48 @@
 use crate::engine::*;
 use std::time::Duration;
 
+/// Live mirrors, user-verified 2026-11: `.gl` active since 2026-02,
+/// `.pk` and `.gd` active since 2026-03. Older domains are gone:
+/// `.org`/`.se`/`.to`/`.ng` no longer resolve, `.li` is parked for sale.
 const MIRRORS: &[&str] = &[
-    "annas-archive.li",
-    "annas-archive.org",
-    "annas-archive.se",
-    "annas-archive.to",
-    "annas-archive.ng",
+    "annas-archive.gl",
+    "annas-archive.pk",
+    "annas-archive.gd",
 ];
 
 pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let page = p.page.max(1);
     let mut last_err = String::new();
+    let mut guarded = 0usize;
     for host in MIRRORS {
         let mut url = format!("https://{host}/search?q={}", urlencode(&p.query));
         if page > 1 { url.push_str(&format!("&page={page}")); }
-        match http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10)) {
-            Ok(body) => {
-                if !body.contains("/md5/") {
-                    // parked / challenge page — try the next mirror
-                    last_err = format!("{host}: no results markup");
-                    continue;
-                }
-                return Ok(parse(&body, host));
+        let fetched = http_get_any_status(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10));
+        if let Ok((_, body)) = &fetched {
+            if body.contains("/md5/") {
+                return Ok(parse(body, host));
             }
-            Err(e) => { last_err = format!("{host}: {e}"); }
+            if body.to_ascii_lowercase().contains("ddos-guard") {
+                // JS + websocket browser check — not passable server-side
+                guarded += 1;
+                last_err = format!("{host}: browser check");
+                continue;
+            }
         }
+        // network error, redirect to a challenge, or a parked page
+        last_err = match &fetched {
+            Ok((status, _)) => format!("{host}: http {status}, no results markup"),
+            Err(e) => format!("{host}: {e}"),
+        };
+    }
+    if guarded == MIRRORS.len() && guarded > 0 {
+        // every live mirror sits behind the browser check — hand the user
+        // a direct link instead of a dead end
+        let msg = format!(
+            "DDoS-Guard browser check on all mirrors — open directly: https://annas-archive.gl/search?q={}",
+            urlencode(&p.query)
+        );
+        return Err(clip(&msg, 118));
     }
     Err(format!("all mirrors unreachable ({})", clip(&last_err, 90)))
 }

@@ -315,6 +315,22 @@ pub fn http_get(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration) 
     }
 }
 
+/// Like `http_get`, but hands back the body together with the status code
+/// even for non-2xx answers — some protections reply 403 with an HTML
+/// challenge page the caller wants to inspect.
+pub fn http_get_any_status(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration)
+    -> Result<(u16, String), String> {
+    let mut rb = http_client().get(url).timeout(timeout).header("User-Agent", ua);
+    for (k, v) in extra { rb = rb.header(*k, *v); }
+    match rb.send() {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            resp.text().map(|t| (status, t)).map_err(|e| format!("read: {e}"))
+        }
+        Err(e) => Err(format!("{e}")),
+    }
+}
+
 pub fn http_get_binary(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration)
     -> Result<(String, Vec<u8>), String> {
     let mut rb = http_client().get(url).timeout(timeout).header("User-Agent", ua);
