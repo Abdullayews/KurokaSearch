@@ -28,7 +28,7 @@ fn ddg_html(p: &SearchParams, extra: &str) -> Result<Vec<SearchResult>, String> 
     let mut body = String::new();
     let mut last_err: Option<String> = None;
     for attempt in 0..2 {
-        match http_get(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10)) {
+        match http_get_ddg(&url, USER_AGENT, &[("Accept", "text/html")], Duration::from_secs(10)) {
             Ok(b) if b.contains("result__a") => { body = b; break; }
             Ok(b) => {
                 let blocked = b.contains("anomaly") || b.contains("challenge")

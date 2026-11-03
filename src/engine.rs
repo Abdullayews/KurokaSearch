@@ -166,10 +166,11 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "ddg", name: "DuckDuckGo", category: "all", default_on: true, paged: true },
     EngineInfo { id: "wikipedia", name: "Wikipedia", category: "all", default_on: true, paged: true },
     EngineInfo { id: "wikidata", name: "Wikidata", category: "all", default_on: true, paged: true },
+    EngineInfo { id: "wiby", name: "Wiby", category: "all", default_on: true, paged: true },
     EngineInfo { id: "marginalia", name: "Marginalia", category: "all", default_on: false, paged: false },
     // images
     EngineInfo { id: "bing_images", name: "Bing Images", category: "images", default_on: true, paged: true },
-    EngineInfo { id: "ddg_images", name: "DuckDuckGo", category: "images", default_on: true, paged: true },
+    EngineInfo { id: "ddg_images", name: "DuckDuckGo", category: "images", default_on: false, paged: true },
     EngineInfo { id: "openverse", name: "Openverse", category: "images", default_on: true, paged: true },
     EngineInfo { id: "commons", name: "Wikimedia Commons", category: "images", default_on: true, paged: true },
     // videos
@@ -188,7 +189,7 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "photon", name: "Photon", category: "maps", default_on: true, paged: false },
     // music
     EngineInfo { id: "itunes", name: "Apple Music", category: "music", default_on: true, paged: false },
-    EngineInfo { id: "deezer", name: "Deezer", category: "music", default_on: true, paged: true },
+    EngineInfo { id: "deezer", name: "Deezer", category: "music", default_on: false, paged: true },
     EngineInfo { id: "musicbrainz", name: "MusicBrainz", category: "music", default_on: true, paged: true },
     EngineInfo { id: "mixcloud", name: "Mixcloud", category: "music", default_on: true, paged: true },
     EngineInfo { id: "audius", name: "Audius", category: "music", default_on: true, paged: true },
@@ -217,7 +218,7 @@ pub const REGISTRY: &[EngineInfo] = &[
     EngineInfo { id: "apibay", name: "The Pirate Bay", category: "files", default_on: true, paged: true },
     // social
     EngineInfo { id: "bing_social", name: "Social Networks", category: "social", default_on: true, paged: true },
-    EngineInfo { id: "reddit", name: "Reddit", category: "social", default_on: true, paged: true },
+    EngineInfo { id: "reddit", name: "Reddit", category: "social", default_on: false, paged: true },
     EngineInfo { id: "lemmy", name: "Lemmy", category: "social", default_on: true, paged: true },
     // onion
     EngineInfo { id: "ahmia", name: "Ahmia", category: "onion", default_on: true, paged: true },
@@ -337,6 +338,42 @@ pub fn http_get(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration) 
             resp.text().map_err(|e| format!("read: {e}"))
         }
         Err(e) => Err(format!("{e}")),
+    }
+}
+
+/// DuckDuckGo's DNS answer points some datacenter networks at an address
+/// they cannot reach. The service is spread over several stable IPs, so
+/// every DDG request goes through a client pinned to a reachable one and
+/// falls back to the default resolver if that pin ever stops working.
+fn ddg_client() -> &'static reqwest::blocking::Client {
+    static C: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| {
+        let pin = "40.114.177.156:443".parse().unwrap();
+        reqwest::blocking::Client::builder()
+            .gzip(true)
+            .resolve("duckduckgo.com", pin)
+            .resolve("html.duckduckgo.com", pin)
+            .build()
+            .unwrap_or_default()
+    })
+}
+
+/// DDG-only variant of `http_get`: pinned IP first, plain resolver second.
+pub fn http_get_ddg(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Duration) -> Result<String, String> {
+    let mut rb = ddg_client().get(url).timeout(timeout).header("User-Agent", ua);
+    for (k, v) in extra { rb = rb.header(*k, *v); }
+    match rb.send() {
+        Ok(resp) => {
+            let status = resp.status();
+            if !status.is_success() { return Err(format!("http {}", status.as_u16())); }
+            match resp.text() {
+                Ok(t) if !t.is_empty() => Ok(t),
+                Ok(_) => Err("empty body".into()),
+                Err(e) => Err(format!("read: {e}")),
+            }
+        }
+        // transport failure on the pinned IP -> retry through normal DNS
+        Err(_) => http_get(url, ua, extra, timeout),
     }
 }
 

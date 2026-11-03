@@ -76,8 +76,9 @@ fn handle(req: tiny_http::Request) {
             let q = get("q");
             let list = autocomplete(&q);
             let body = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
-            // API responses are the only cacheable things — short and shared
-            let _ = respond(req, 200, json_ct(), body.into_bytes(), Some("public, max-age=300"));
+            // API responses are cacheable — private so queries never sit on
+            // shared proxies, only in the visitor's own browser
+            let _ = respond(req, 200, json_ct(), body.into_bytes(), Some("private, max-age=86400"));
         }
         "/img" => {
             let u = get("u");
@@ -87,7 +88,7 @@ fn handle(req: tiny_http::Request) {
                 match fetch_image_cached(&u) {
                     Ok((ctype, bytes)) => {
                         let _ = respond(req, 200, Header::from_bytes(&b"Content-Type"[..], ctype.as_bytes()).unwrap(),
-                            bytes, Some("public, max-age=86400"));
+                            bytes, Some("private, max-age=86400"));
                     }
                     Err(e) => text(req, 502, &engine::clip(&e, 120)),
                 }
@@ -214,6 +215,7 @@ fn serve_static(req: tiny_http::Request, url_path: &str) {
         "css" => "text/css; charset=utf-8",
         "js" => "text/javascript; charset=utf-8",
         "png" => "image/png",
+        "webp" => "image/webp",
         "jpg" | "jpeg" => "image/jpeg",
         "svg" => "image/svg+xml",
         "ico" => "image/x-icon",

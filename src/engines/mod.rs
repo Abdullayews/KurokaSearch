@@ -33,6 +33,7 @@ pub mod misc_extra;
 pub mod ddg_media;
 pub mod reddit;
 pub mod deezer;
+pub mod wiby;
 
 use crate::engine::{SearchParams, SearchResult};
 
@@ -89,6 +90,7 @@ pub fn run(id: &str, p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         "ddg_videos" => ddg_media::ddg_videos(p),
         "reddit" => reddit::search(p),
         "deezer" => deezer::search(p),
+        "wiby" => wiby::search(p),
         other => Err(format!("unknown engine: {other}")),
     }
 }

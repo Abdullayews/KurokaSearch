@@ -246,6 +246,10 @@
             if (card) card.classList.add("k-img-dead");
           };
         });
+        // favicons: a failed icon removes itself, the letter avatar shows
+        $$("img.k-fav, .k-ava img", e).forEach(function (img) {
+          img.onerror = function () { img.remove(); };
+        });
       }) : null;
     }
   })();
