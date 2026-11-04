@@ -8,7 +8,11 @@ black-and-gold interface.
 - **No tracking** — no analytics, no fingerprinting, no session cookies
 - **No logs** — queries are proxied through the server and never stored
 - **No ads, no ranking games** — round-robin interleave keeps engine diversity
-- **Bring your own AI** — optional AI summaries run in *your* browser with *your* API key
+- **Infinite scroll everywhere** — every tab keeps loading as you scroll
+  (with a manual Load-more fallback), across all paged engines
+- **Bring your own AI** — optional AI report streams in *your* browser with
+  *your* API key: real token streaming, numbered citations that link to the
+  results, and follow-up search chips
 - **Transparent by default** — true-black AMOLED theme, and wallpaper-transparent
   under the Zen Internet extension
 - **Single ~7 MB binary**, no runtime dependencies
@@ -104,7 +108,10 @@ browser ──▶ kuroka-search (tiny_http workers)
 * Results are interleaved round-robin across engines so no single provider
   dominates the page, then de-duplicated by normalized URL.
 * The AI Report is generated **client-side**: your provider key lives in
-  `localStorage` and is sent only to the AI provider you choose.
+  `localStorage` and is sent only to the AI provider you choose (Gemini,
+  OpenAI, Groq, OpenRouter, Z.ai or any OpenAI-compatible endpoint). The
+  report streams token-by-token, cites the results it used as clickable
+  `[n]` markers, and finishes with three follow-up searches.
 
 ## Project layout
 

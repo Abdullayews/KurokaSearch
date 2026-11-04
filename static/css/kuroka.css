@@ -849,6 +849,96 @@ span.k-inf-err { color: var(--err); font-size: 12px; background: none; box-shado
 .k-ai-go:active { transform: scale(0.96); }
 .k-ai-go:disabled { opacity: 0.55; cursor: wait; }
 
+/* model chip, action row, ghost buttons */
+.k-ai-model {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mut);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.k-ai-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.k-ai-ghost {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--mut-2);
+  padding: 7px 15px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.k-ai-ghost:hover { border-color: var(--gold-3); color: var(--gold-2); background: rgba(var(--gold-rgb), 0.06); }
+.k-ai-ghost[hidden] { display: none; }
+
+/* streamed report body — paragraphs, bullets, citations */
+.k-ai-out .k-ai-p { margin: 0 0 8px; white-space: normal; }
+.k-ai-out .k-ai-p:last-child { margin-bottom: 0; }
+.k-ai-out .k-ai-ul { margin: 2px 0 8px; padding-left: 20px; }
+.k-ai-out .k-ai-ul li { margin: 4px 0; }
+.k-ai-out .k-ai-ul li:last-child { margin-bottom: 0; }
+.k-ai-cite a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  margin: 0 2px;
+  padding: 0 3px;
+  border-radius: 5px;
+  border: 1px solid rgba(var(--gold-rgb), 0.45);
+  background: rgba(var(--gold-rgb), 0.12);
+  color: var(--gold-2);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: super;
+  transition: background 0.18s, border-color 0.18s;
+}
+.k-ai-cite a:hover { background: rgba(var(--gold-rgb), 0.28); border-color: var(--gold-3); }
+
+/* streaming caret */
+.k-ai-out.k-ai-streaming .k-ai-p:last-child::after,
+.k-ai-out.k-ai-streaming .k-ai-ul li:last-child::after {
+  content: "\258D";
+  margin-left: 2px;
+  color: var(--gold);
+  animation: k-ai-caret 0.9s steps(2) infinite;
+}
+@keyframes k-ai-caret { 50% { opacity: 0; } }
+
+/* follow-up chips */
+.k-ai-fups {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.k-ai-fups[hidden] { display: none; }
+.k-ai-fup {
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-pill);
+  background: rgba(var(--gold-rgb), 0.05);
+  color: var(--gold-2);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, border-style 0.2s;
+}
+.k-ai-fup:hover { background: rgba(var(--gold-rgb), 0.14); border-style: solid; border-color: var(--gold-3); }
+
 /* ----- web results: liquid-glass cards, ONE column, always ----- */
 
 .k-rs { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
@@ -1094,6 +1184,34 @@ a.k-r-eng:hover { border-color: var(--line-2); }
   animation: k-spin 0.8s linear infinite;
 }
 @keyframes k-spin { to { transform: rotate(360deg); } }
+
+/* manual fallback button + end-of-results note (infinite scroll) */
+.k-more-btn {
+  display: block;
+  margin: 20px auto 4px;
+  padding: 9px 26px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-2);
+  background: var(--glass-2);
+  color: var(--mut-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.k-more-btn:hover { border-color: var(--gold-3); color: var(--gold-2); background: var(--glass); }
+.k-more-btn[hidden] { display: none; }
+.k-more-end {
+  margin: 20px auto 8px;
+  width: fit-content;
+  padding: 6px 18px;
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--line);
+  color: var(--mut);
+  font-size: 12px;
+}
+.k-more-end[hidden] { display: none; }
 
 /* ----- videos ----- */
 
@@ -1851,6 +1969,11 @@ body.k-light .k-set-win { background: rgba(255, 252, 244, 0.94); }
   .k-mus { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 
   .k-more { margin: 18px auto 4px; font-size: 12px; }
+  .k-more-btn { font-size: 12.5px; padding: 8px 22px; }
+  .k-ai-model { max-width: 120px; }
+  .k-ai-ghost { padding: 6px 12px; font-size: 12px; }
+  .k-ai-fup { font-size: 12px; padding: 5px 12px; }
+  .k-ai-cite a { min-width: 13px; height: 13px; font-size: 9px; }
   .k-extras { margin: 0 10px 16px; }
   .k-gmap { height: clamp(260px, 44vh, 420px); }
   .k-nors-img { width: 170px; height: 170px; }
