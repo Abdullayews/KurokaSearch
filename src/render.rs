@@ -339,22 +339,41 @@ fn info_table(out: &SearchOutcome) -> String {
 }
 
 fn ai_card(q: &str, out: &SearchOutcome) -> String {
-    // context for the client-side provider call: top results, compact
+    // numbered context for the client-side provider call: top 10 results,
+    // each tagged [n] (domain) title — desc. The same numbering ships as a
+    // JSON source list so the browser can turn [n] citations into links.
     let mut ctx = String::new();
-    for r in out.results.iter().take(8) {
-        ctx.push_str(&format!("- {} — {}\n", r.title, r.desc));
+    let mut sources = String::new();
+    for (i, r) in out.results.iter().take(10).enumerate() {
+        ctx.push_str(&format!("[{}] ({}) {} — {}\n", i + 1, r.source, r.title, r.desc));
+        sources.push_str(&format!(
+            "{{\"n\":{},\"u\":{},\"d\":{}}},",
+            i + 1,
+            serde_json::to_string(&r.url).unwrap_or_default(),
+            serde_json::to_string(&r.source).unwrap_or_default()));
     }
-    let ctx_json = serde_json::to_string(&clip(&ctx, 6000)).unwrap_or_default();
+    let sources_json = if sources.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{}]", sources.trim_end_matches(','))
+    };
+    let ctx_json = serde_json::to_string(&clip(&ctx, 7000)).unwrap_or_default();
     format!(r#"<div class="k-ai" id="kAi">
   <img class="k-ai-ava" src="/static/brand/ai-avatar.png" alt="" width="44" height="44">
   <div class="k-ai-body">
-    <div class="k-ai-head">AI Report <span class="k-ai-prov" id="kAiProv">Google Gemini</span></div>
-    <div class="k-ai-note">Summarizes these results. Add your API key in <button type="button" class="k-linklike" id="kAiOpenSet">Settings</button> — the key stays in this browser.</div>
+    <div class="k-ai-head">AI Report <span class="k-ai-prov" id="kAiProv">Google Gemini</span><span class="k-ai-model" id="kAiModel"></span></div>
+    <div class="k-ai-note">Summarizes these results with citations. Bring your own key in <button type="button" class="k-linklike" id="kAiOpenSet">Settings</button> — it never leaves this browser.</div>
     <div class="k-ai-out" id="kAiOut" hidden></div>
-    <button class="k-ai-go" id="kAiGo" type="button" data-q="{}" data-ctx="{}">Generate</button>
+    <div class="k-ai-fups" id="kAiFups" hidden></div>
+    <div class="k-ai-acts">
+      <button class="k-ai-go" id="kAiGo" type="button" data-q="{}" data-ctx="{}" data-sources="{}">Generate</button>
+      <button type="button" class="k-ai-ghost" id="kAiStop" hidden>Stop</button>
+      <button type="button" class="k-ai-ghost" id="kAiCopy" hidden>Copy</button>
+      <button type="button" class="k-ai-ghost" id="kAiRegen" hidden>Regenerate</button>
+    </div>
   </div>
 </div>
-"#, esc(q), esc(&ctx_json))
+"#, esc(q), esc(&ctx_json), esc(&sources_json))
 }
 
 fn no_results(p: &SearchParams) -> String {
@@ -659,12 +678,13 @@ fn settings_modal() -> String {
           <div class="k-p-row"><label for="s-ai-prov">Provider</label>"#);
     o.push_str(&dd("s-dd-prov", "aiProv", &[
         ("gemini","Google Gemini"),("openai","OpenAI"),("groq","Groq"),
-        ("openrouter","OpenRouter"),("custom","Custom (OpenAI-compatible)")], "gemini", false));
+        ("openrouter","OpenRouter"),("zai","Z.ai (GLM)"),("custom","Custom (OpenAI-compatible)")], "gemini", false));
     o.push_str(r#"</div>
-          <div class="k-p-row"><label for="s-ai-model">Model</label><input type="text" id="s-ai-model" class="k-p-in" placeholder="gemini-flash-lite-latest" autocomplete="off"></div>
+          <div class="k-p-row"><label for="s-ai-model">Model <span class="k-p-note">(any id the provider accepts)</span></label><input type="text" id="s-ai-model" class="k-p-in" placeholder="gemini-flash-latest" autocomplete="off"></div>
           <div class="k-p-row"><label for="s-ai-key">API key</label><input type="password" id="s-ai-key" class="k-p-in" placeholder="paste key — stored locally" autocomplete="off"></div>
           <div class="k-p-row"><label for="s-ai-base">Base URL <span class="k-p-note">(custom providers)</span></label><input type="text" id="s-ai-base" class="k-p-in" placeholder="https://…/v1" autocomplete="off"></div>
-          <p class="k-set-note">Bring your own key — requests go from this browser straight to the provider.</p>
+          <div class="k-p-row"><label for="s-ai-auto">Auto-generate the report</label><label class="k-switch"><input type="checkbox" id="s-ai-auto" checked><span class="k-sl"></span></label></div>
+          <p class="k-set-note">Bring your own key — requests stream straight from this browser to the provider. The report cites the results it used and ends with follow-up searches.</p>
         </section>
         <section class="k-set-pane" data-pane="engines">"#);
     // per-category engine toggles

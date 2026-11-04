@@ -14,7 +14,7 @@
   var DEFAULT_PREFS = {
     lang: "auto", time: "", ss: "0", cat: "all", newtab: false, ac: true,
     theme: "dark", glow: true, engines: {}, accent: "",
-    aiProv: "gemini", aiModel: "", aiKey: "", aiBase: ""
+    aiProv: "gemini", aiModel: "", aiKey: "", aiBase: "", aiAuto: true
   };
 
   function loadPrefs() {
@@ -338,6 +338,15 @@
    * Appends item-by-item (not whole containers), drops links already on
    * screen, silently skips pages that yield nothing new, and shows a small
    * loader while a batch is in flight. Works for every grid type.
+   *
+   * Three INDEPENDENT triggers, because a single quirky browser, extension
+   * or iOS toolbar must never strand the user at the bottom:
+   *   1. IntersectionObserver on a bottom sentinel (rootMargin 1100px)
+   *   2. plain scroll-position math (scrollY + innerHeight near docHeight)
+   *   3. an always-visible "Load more" button (also keyboard accessible)
+   * A failed fetch re-arms itself; a page that answers nothing while a
+   * stale saved engine subset (e=) is in play is retried once with the
+   * category defaults.
    * ------------------------------------------------------------------ */
 
   (function () {
@@ -349,9 +358,11 @@
     var cont = $(CONT, main);
     if (!cont) return;
 
-    var busy = false, done = false, emptyTries = 0;
+    var MAX_PAGE = 50;
+    var busy = false, done = false, emptyTries = 0, errTries = 0, strippedE = false;
     var page = parseInt(main.getAttribute("data-page") || "1", 10) || 1;
     var more = main.getAttribute("data-more") === "1";
+    var startCount = $$(ITEM, main).length;
 
     /* an item's link: grid tiles (.k-img, .k-vid) ARE the anchor, list and
      * card items carry the anchor inside — both must resolve */
@@ -375,17 +386,63 @@
     var loader = document.createElement("div");
     loader.className = "k-more";
     loader.hidden = true;
-    loader.innerHTML = '<span class="k-more-spin" aria-hidden="true"></span>Loading more…';
+    loader.innerHTML = '<span class="k-more-spin" aria-hidden="true"></span><span class="k-more-t">Loading more…</span>';
     main.appendChild(loader);
 
-    function sentinel() {
-      var s = document.createElement("div");
-      s.id = "kInfSentinel";
-      s.style.height = "1px";
-      s.setAttribute("aria-hidden", "true");
-      main.appendChild(s);
-      return s;
+    /* manual fallback — always reachable, keyboard focusable */
+    var moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "k-more-btn";
+    moreBtn.textContent = "Load more";
+    main.appendChild(moreBtn);
+
+    var endNote = document.createElement("div");
+    endNote.className = "k-more-end";
+    endNote.textContent = "You've reached the end of the results";
+    endNote.hidden = true;
+    main.appendChild(endNote);
+
+    var sent = document.createElement("div");
+    sent.id = "kInfSentinel";
+    sent.style.height = "1px";
+    sent.setAttribute("aria-hidden", "true");
+    main.appendChild(sent);
+
+    var io = null;
+    function finish() {
+      done = true;
+      busy = false;
+      loader.hidden = true;
+      moreBtn.hidden = true;
+      /* a tab with only a handful of results ends silently — no banner */
+      if (page > 1 || startCount >= 4) endNote.hidden = false;
+      if (io) io.disconnect();
     }
+
+    /* a page with too few results to page: no controls at all */
+    if (!more && startCount < 4) {
+      moreBtn.hidden = true;
+      done = true;
+      return;
+    }
+
+    if ("IntersectionObserver" in window) {
+      io = new IntersectionObserver(function (entries) {
+        if (entries[0].isIntersecting) check();
+      }, { rootMargin: "1100px 0px" });
+      io.observe(sent);
+    }
+
+    /* trigger 2: plain scroll math — the safety net */
+    window.addEventListener("scroll", function () {
+      if (busy || done) return;
+      var d = document.documentElement;
+      if ((window.scrollY || d.scrollTop || 0) + window.innerHeight >= d.scrollHeight - 1600) check();
+    }, { passive: true });
+    /* rotation / window resize fills the viewport — top it up */
+    window.addEventListener("resize", function () { check(); }, { passive: true });
+    /* bfcache restore (back/forward) — the grid may be short again */
+    window.addEventListener("pageshow", function () { check(); });
 
     function hookDead(els) {
       (els || []).forEach(function (e) {
@@ -400,19 +457,66 @@
       });
     }
 
+    /* appended nodes must honor the new-tab preference too */
+    function applyNewtab(els) {
+      if (!prefs.newtab || !els) return;
+      els.forEach(function (e) {
+        $$("a[href^='http']", e).forEach(function (a) {
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+        });
+      });
+    }
+
+    /* keep the URL in step with the deepest page loaded — a refresh
+     * resumes where the reader was */
+    function syncUrl() {
+      try {
+        var u = new URL(window.location.href);
+        if (page > 1) u.searchParams.set("page", String(page));
+        else u.searchParams.delete("page");
+        window.history.replaceState(null, "", u.toString());
+      } catch (e) { /* older browsers */ }
+    }
+
     function load() {
       busy = true;
       loader.hidden = false;
-      fetch(searchUrl({ page: page + 1 }), { headers: { "X-Requested-With": "kuroka" } })
-        .then(function (r) { return r.text(); })
+      var t = $(".k-more-t", loader);
+      if (t) t.textContent = "Loading more…";
+      var url = searchUrl({ page: page + 1 });
+      /* retry lane: same page, category-default engines */
+      if (strippedE) url = url.replace(/([?&])e=[^&]*/, "$1");
+      fetch(url, { headers: { "X-Requested-With": "kuroka" } })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.text();
+        })
         .then(function (html) {
           var doc = new DOMParser().parseFromString(html, "text/html");
           var nm = doc.getElementById("kMain");
+          var hadE = /[?&]e=/.test(url);
           if (!nm || $(".k-nors", nm)) {
-            done = true; busy = false; loader.hidden = true; return;
+            /* a saved engine subset that pages to nothing may simply be
+             * stale — one retry with the defaults before giving up */
+            if (nm && hadE && !strippedE) {
+              strippedE = true;
+              busy = false; loader.hidden = true;
+              load();
+              return;
+            }
+            finish(); syncUrl();
+            return;
+          }
+          var items = $$(ITEM, nm);
+          if (!items.length && hadE && !strippedE) {
+            strippedE = true;
+            busy = false; loader.hidden = true;
+            load();
+            return;
           }
           var add = [];
-          $$(ITEM, nm).forEach(function (el) {
+          items.forEach(function (el) {
             var href = itemHref(el);
             if (!href || seen[href]) return;
             seen[href] = true;
@@ -420,28 +524,49 @@
           });
           add.forEach(function (el) { cont.appendChild(el); });
           hookDead(add);
+          applyNewtab(add);
           page = parseInt(nm.getAttribute("data-page") || "1", 10) || (page + 1);
           more = nm.getAttribute("data-more") === "1";
-          if (add.length) emptyTries = 0; else emptyTries++;
-          if (!more || page >= 50 || emptyTries >= 2) { done = true; }
+          if (add.length) { emptyTries = 0; } else { emptyTries++; }
+          errTries = 0;
+          if (!more || page >= MAX_PAGE || emptyTries >= 3) { finish(); syncUrl(); return; }
           busy = false;
           loader.hidden = true;
+          syncUrl();
+          /* continue ONLY while the grid still does not outgrow the
+           * viewport — a short page keeps filling, a tall one waits for
+           * the reader to scroll (IO / scroll / button re-arm it) */
           check();
         })
-        .catch(function () { busy = false; loader.hidden = true; });
+        .catch(function () {
+          busy = false;
+          errTries++;
+          loader.hidden = true;
+          if (errTries >= 3) { finish(); return; }
+          /* a blip must not strand a stationary reader — re-arm shortly */
+          setTimeout(function () { check(); }, 1200);
+        });
     }
 
-    var sent = sentinel();
-    var io = new IntersectionObserver(function (entries) {
-      if (entries[0].isIntersecting) check();
-    }, { rootMargin: "900px 0px" });
-    io.observe(sent);
+    function nearBottom() {
+      var d = document.documentElement;
+      return (window.scrollY || d.scrollTop || 0) + window.innerHeight >= d.scrollHeight - 1600;
+    }
 
-    function check() {
+    /* `force` (the Load-more button) ignores the position check; every
+     * other trigger loads only when the reader is actually near the
+     * bottom — after an append the chain simply stops once the grid
+     * outgrows the viewport, instead of burning through all pages */
+    function check(force) {
       if (busy || done) return;
-      if (!more || page >= 50) { done = true; io.disconnect(); return; }
+      if (!more || page >= MAX_PAGE) { finish(); return; }
+      if (!force && !nearBottom()) return;
       load();
     }
+
+    moreBtn.addEventListener("click", function () {
+      check(true);
+    });
   })();
 
   /* ------------------------------------------------------------------ *
@@ -844,6 +969,7 @@
     var m = $("#s-ai-model"); if (m) m.value = prefs.aiModel || "";
     var k = $("#s-ai-key"); if (k) k.value = prefs.aiKey || "";
     var b = $("#s-ai-base"); if (b) b.value = prefs.aiBase || "";
+    var aa = $("#s-ai-auto"); if (aa) aa.checked = prefs.aiAuto !== false;
     var ac = $("#s-ac"); if (ac) ac.checked = prefs.ac !== false;
     var nt = $("#s-newtab"); if (nt) nt.checked = !!prefs.newtab;
     var gl = $("#s-glow"); if (gl) gl.checked = prefs.glow !== false;
@@ -901,7 +1027,8 @@
         aiProv: ddValByCur("s-dd-prov") || "gemini",
         aiModel: ($("#s-ai-model") || {}).value || "",
         aiKey: ($("#s-ai-key") || {}).value || "",
-        aiBase: ($("#s-ai-base") || {}).value || ""
+        aiBase: ($("#s-ai-base") || {}).value || "",
+        aiAuto: ($("#s-ai-auto") || {}).checked !== false
       };
       savePrefs(prefs);
       applyTheme();
@@ -1049,90 +1176,280 @@
   });
 
   /* ------------------------------------------------------------------ *
-   * AI report (bring-your-own-key; the key stays in localStorage)
+   * AI report (bring-your-own-key; the key stays in localStorage).
+   * Real token streaming (SSE) for Gemini and every OpenAI-compatible
+   * provider, numbered citations that link to the actual results,
+   * markdown-lite rendering (bold / bullets), follow-up chips, copy,
+   * stop/regenerate, session cache per query and optional auto-run.
    * ------------------------------------------------------------------ */
 
   var aiGo = $("#kAiGo");
   if (aiGo) {
     var AI_PROVIDERS = {
-      gemini:     { label: "Google Gemini", base: "", model: "gemini-flash-lite-latest" },
+      gemini:     { label: "Google Gemini", base: "", model: "gemini-flash-latest" },
       openai:     { label: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
       groq:       { label: "Groq", base: "https://api.groq.com/openai/v1", model: "llama-3.1-8b-instant" },
       openrouter: { label: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "openrouter/auto" },
+      zai:        { label: "Z.ai (GLM)", base: "https://api.z.ai/api/paas/v4", model: "glm-5.3-flash" },
       custom:     { label: "Custom", base: "", model: "" }
     };
     var prov = AI_PROVIDERS[prefs.aiProv] || AI_PROVIDERS.gemini;
-    var provEl = $("#kAiProv");
+    var provEl = $("#kAiProv"), modelEl = $("#kAiModel");
     if (provEl) provEl.textContent = prov.label;
+    if (modelEl) modelEl.textContent = prefs.aiModel || prov.model || "";
 
-    var out = $("#kAiOut");
+    var out = $("#kAiOut"), fupsEl = $("#kAiFups");
+    var stopBtn = $("#kAiStop"), copyBtn = $("#kAiCopy"), regenBtn = $("#kAiRegen");
+    var q = aiGo.getAttribute("data-q") || "";
+    var ctx = "";
+    try { ctx = JSON.parse(aiGo.getAttribute("data-ctx") || '""'); } catch (e) { ctx = ""; }
+    var sources = [];
+    try { sources = JSON.parse(aiGo.getAttribute("data-sources") || "[]") || []; } catch (e) { sources = []; }
+    var cacheKey = "kuroka.ai." + q;
 
-    function aiRender(text) {
-      if (!out) return;
-      out.hidden = false;
-      out.textContent = "";
-      var i = 0;
-      (function step() {
-        if (i >= text.length) return;
-        out.textContent += text.slice(i, i + 6);
-        i += 6;
-        setTimeout(step, 8);
-      })();
+    /* ----- markdown-lite renderer (DOM-built; model text is never
+       innerHTML-ed, so injection is impossible by construction) ----- */
+
+    function inlineInto(el, text) {
+      var parts = String(text).split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[0-9]{1,2}\])/g);
+      parts.forEach(function (p) {
+        if (!p) return;
+        var m;
+        if ((m = p.match(/^\*\*([^*]+)\*\*$/))) {
+          var b = document.createElement("b");
+          b.textContent = m[1];
+          el.appendChild(b);
+        } else if ((m = p.match(/^\*([^*]+)\*$/))) {
+          var it = document.createElement("i");
+          it.textContent = m[1];
+          el.appendChild(it);
+        } else if ((m = p.match(/^\[([0-9]{1,2})\]$/))) {
+          var n = parseInt(m[1], 10);
+          var src = null;
+          for (var i = 0; i < sources.length; i++) {
+            if (sources[i].n === n) { src = sources[i]; break; }
+          }
+          var sup = document.createElement("sup");
+          sup.className = "k-ai-cite";
+          if (src) {
+            var a = document.createElement("a");
+            a.href = src.u;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.title = src.d;
+            a.textContent = String(n);
+            sup.appendChild(a);
+          } else {
+            sup.textContent = "[" + n + "]";
+          }
+          el.appendChild(sup);
+        } else {
+          el.appendChild(document.createTextNode(p));
+        }
+      });
     }
 
-    aiGo.addEventListener("click", function () {
-      if (!prefs.aiKey) {
-        toast("Add your API key in Settings → AI Report");
-        openSettings();
-        return;
+    function renderReport(text) {
+      out.hidden = false;
+      out.textContent = "";
+      var ul = null;
+      String(text || "").split(/\r?\n/).forEach(function (raw) {
+        var line = raw.replace(/\s+$/, "");
+        if (!line.trim()) { ul = null; return; }
+        var mb = line.match(/^\s*(?:[-*\u2022])\s+(.*)$/) || line.match(/^\s*[0-9]{1,2}[.)]\s+(.*)$/);
+        if (mb) {
+          if (!ul) { ul = document.createElement("ul"); ul.className = "k-ai-ul"; out.appendChild(ul); }
+          var li = document.createElement("li");
+          inlineInto(li, mb[1]);
+          ul.appendChild(li);
+        } else {
+          ul = null;
+          var p = document.createElement("p");
+          p.className = "k-ai-p";
+          inlineInto(p, line);
+          out.appendChild(p);
+        }
+      });
+    }
+
+    function renderFups(list) {
+      if (!fupsEl) return;
+      if (!list || !list.length) { fupsEl.hidden = true; return; }
+      fupsEl.hidden = false;
+      fupsEl.textContent = "";
+      list.slice(0, 3).forEach(function (f) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "k-ai-fup";
+        b.textContent = f;
+        b.addEventListener("click", function () {
+          window.location.href = "/search?q=" + encodeURIComponent(f);
+        });
+        fupsEl.appendChild(b);
+      });
+    }
+
+    /* the model ends with a lone @@@ line followed by 3 follow-ups */
+    function splitFups(text) {
+      var parts = String(text || "").split(/\r?\n@@@\r?\n?/);
+      if (parts.length < 2) return { body: String(text || "").trim(), fups: [] };
+      var fups = parts.slice(1).join("\n").split(/\r?\n/)
+        .map(function (s) { return s.replace(/^\s*(?:[-*\u2022]|[0-9]{1,2}[.)])\s*/, "").replace(/^["']|["']$/g, "").trim(); })
+        .filter(function (s) { return s.length > 2 && s.length < 90; });
+      return { body: parts[0].trim(), fups: fups };
+    }
+
+    function cacheGet() {
+      try { return JSON.parse(sessionStorage.getItem(cacheKey)); } catch (e) { return null; }
+    }
+    function cachePut(body, fups) {
+      try { sessionStorage.setItem(cacheKey, JSON.stringify({ t: body, f: fups })); } catch (e) {}
+    }
+
+    function setIdle(hasReport) {
+      aiGo.disabled = false;
+      aiGo.textContent = "Generate";
+      if (stopBtn) stopBtn.hidden = true;
+      if (copyBtn) copyBtn.hidden = !hasReport;
+      if (regenBtn) regenBtn.hidden = !hasReport;
+    }
+
+    function finishStream(text, cached) {
+      var split = splitFups(text);
+      renderReport(split.body);
+      renderFups(split.fups);
+      if (!cached) cachePut(split.body, split.fups);
+      out.classList.remove("k-ai-streaming");
+      setIdle(true);
+    }
+
+    function failStream(msg) {
+      aiGo.disabled = false;
+      aiGo.textContent = "Generate";
+      if (stopBtn) stopBtn.hidden = true;
+      out.classList.remove("k-ai-streaming");
+      out.hidden = true;
+      if (fupsEl) fupsEl.hidden = true;
+      setIdle(false);
+      toast("AI error: " + msg);
+    }
+
+    function promptFor() {
+      return "You are Kuroka, the AI librarian of the KurokaSearch metasearch engine. " +
+        "Write a concise, factual briefing (max ~150 words) answering the user's query, based ONLY on the numbered search-result snippets below.\n" +
+        "Rules:\n" +
+        "- Answer in the SAME LANGUAGE as the query.\n" +
+        "- Start with one direct sentence that answers the query.\n" +
+        "- Then 2-4 short bullet points (starting with '- ') holding the key facts.\n" +
+        "- Cite sources inline as [1], [2], ... using the snippet numbers; every non-obvious claim needs a citation.\n" +
+        "- If the snippets are insufficient to answer, say so plainly.\n" +
+        "- Never invent facts.\n" +
+        "After the briefing, on a line of its own write @@@ and then exactly 3 short follow-up search queries, one per line, no numbering, no quotes.\n\n" +
+        "Query: " + q + "\n\nSearch result snippets:\n" + ctx;
+    }
+
+    /* ----- SSE reader: feeds every parsed data: payload to onData ----- */
+    function readSse(resp, onData) {
+      var reader = resp.body.getReader();
+      var dec = new TextDecoder();
+      var buf = "";
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) return;
+          buf += dec.decode(r.value, { stream: true });
+          var lines = buf.split(/\r?\n/);
+          buf = lines.pop(); /* keep the trailing partial line */
+          lines.forEach(function (ln) {
+            if (ln.indexOf("data:") !== 0) return;
+            var payload = ln.slice(5).trim();
+            if (!payload || payload === "[DONE]") return;
+            var j = null;
+            try { j = JSON.parse(payload); } catch (e) { return; }
+            onData(j);
+          });
+          return pump();
+        });
       }
+      return pump();
+    }
+
+    var ctrl = null, userStop = false;
+
+    function run() {
+      if (!prefs.aiKey) { toast("Add your API key in Settings → AI Report"); openSettings(); return; }
       var model = prefs.aiModel || prov.model;
       if (!model) { toast("Set a model name in Settings"); openSettings(); return; }
       var base = prefs.aiBase || prov.base;
-      if (prefs.aiProv !== "gemini" && !base) { toast("Set a Base URL for the custom provider"); return; }
-
-      var q = aiGo.getAttribute("data-q") || "";
-      var ctx = "";
-      try { ctx = JSON.parse(aiGo.getAttribute("data-ctx") || '""'); } catch (e) { ctx = ""; }
-      var prompt =
-        "You are Kuroka, the AI librarian of the KurokaSearch metasearch engine. " +
-        "Write a concise, factual briefing (max ~180 words) answering the user's query, " +
-        "based ONLY on the provided search-result snippets. Cite the domains you used " +
-        "inline like (example.com). If the snippets are insufficient, say so plainly.\n\n" +
-        "Query: " + q + "\n\nSearch result snippets:\n" + ctx;
+      if (prefs.aiProv !== "gemini" && !base) { toast("Set a Base URL for the custom provider"); openSettings(); return; }
 
       aiGo.disabled = true;
       aiGo.textContent = "Thinking\u2026";
-      if (out) { out.hidden = false; out.textContent = "\u2026"; }
+      userStop = false;
+      if (stopBtn) stopBtn.hidden = false;
+      if (copyBtn) copyBtn.hidden = true;
+      if (regenBtn) regenBtn.hidden = true;
+      if (fupsEl) fupsEl.hidden = true;
+      out.hidden = false;
+      out.textContent = "";
+      out.classList.add("k-ai-streaming");
 
-      var done = function (text) {
-        aiGo.disabled = false;
-        aiGo.textContent = "Generate";
-        aiRender(String(text || "").trim() || "(empty response)");
-      };
-      var fail = function (msg) {
-        aiGo.disabled = false;
-        aiGo.textContent = "Generate";
-        if (out) out.hidden = true;
-        toast("AI error: " + msg);
-      };
+      ctrl = ("AbortController" in window) ? new AbortController() : null;
+      var signal = ctrl ? ctrl.signal : undefined;
+      var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 45000);
+      var acc = "", gotAny = false;
+
+      function onDelta(chunk) {
+        if (!chunk) return;
+        gotAny = true;
+        acc += chunk;
+        renderReport(splitFups(acc).body);
+        out.scrollTop = out.scrollHeight;
+      }
+
+      function errText(r) {
+        return r.json().then(function (j) {
+          throw new Error((j && j.error && j.error.message) || ("HTTP " + r.status));
+        }, function () { throw new Error("HTTP " + r.status); });
+      }
+
+      function catchAll(e) {
+        clearTimeout(to);
+        ctrl = null;
+        if (userStop) { finishStream(acc || "(stopped)"); return; }
+        if (gotAny) { finishStream(acc); return; } /* stream broke, keep the text */
+        failStream((e && e.message) || "network");
+      }
 
       if (prefs.aiProv === "gemini") {
         var u = "https://generativelanguage.googleapis.com/v1beta/models/" +
-                encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(prefs.aiKey);
+                encodeURIComponent(model) + ":streamGenerateContent?alt=sse&key=" + encodeURIComponent(prefs.aiKey);
         fetch(u, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] })
+          body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: promptFor() }] }] }),
+          signal: signal
         }).then(function (r) {
-          return r.json().then(function (j) { return { ok: r.ok, j: j }; });
-        }).then(function (res) {
-          if (!res.ok) throw new Error((res.j && res.j.error && res.j.error.message) || ("HTTP " + res.status));
-          var parts = res.j && res.j.candidates && res.j.candidates[0] &&
-                      res.j.candidates[0].content && res.j.candidates[0].content.parts;
-          var text = (parts || []).map(function (p) { return p.text || ""; }).join("");
-          done(text);
-        }).catch(function (e) { fail(e.message || "network"); });
+          if (!r.ok) return errText(r);
+          if (!r.body) {
+            /* no streaming support — plain JSON path */
+            return r.json().then(function (j) {
+              var parts = j && j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
+              acc = (parts || []).map(function (p) { return p.text || ""; }).join("");
+              clearTimeout(to);
+              ctrl = null;
+              finishStream(acc);
+            });
+          }
+          return readSse(r, function (j) {
+            var parts = j && j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
+            var t = (parts || []).map(function (p) { return p.text || ""; }).join("");
+            if (t) onDelta(t);
+          }).then(function () {
+            clearTimeout(to);
+            ctrl = null;
+            finishStream(acc);
+          });
+        }).catch(catchAll);
       } else {
         fetch(base.replace(/\/+$/, "") + "/chat/completions", {
           method: "POST",
@@ -1142,20 +1459,63 @@
           },
           body: JSON.stringify({
             model: model,
+            stream: true,
             messages: [
               { role: "system", content: "You are Kuroka, a concise and factual search summarizer." },
-              { role: "user", content: prompt }
+              { role: "user", content: promptFor() }
             ]
-          })
+          }),
+          signal: signal
         }).then(function (r) {
-          return r.json().then(function (j) { return { ok: r.ok, j: j }; });
-        }).then(function (res) {
-          if (!res.ok) throw new Error((res.j && res.j.error && res.j.error.message) || ("HTTP " + res.status));
-          var text = res.j && res.j.choices && res.j.choices[0] &&
-                     res.j.choices[0].message && res.j.choices[0].message.content;
-          done(text);
-        }).catch(function (e) { fail(e.message || "network"); });
+          if (!r.ok) return errText(r);
+          if (!r.body) {
+            return r.json().then(function (j) {
+              acc = (j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "";
+              clearTimeout(to);
+              ctrl = null;
+              finishStream(acc);
+            });
+          }
+          return readSse(r, function (j) {
+            var d = j && j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
+            if (d) onDelta(d);
+          }).then(function () {
+            clearTimeout(to);
+            ctrl = null;
+            finishStream(acc);
+          });
+        }).catch(catchAll);
       }
+    }
+
+    aiGo.addEventListener("click", run);
+    if (stopBtn) stopBtn.addEventListener("click", function () {
+      userStop = true;
+      if (ctrl) ctrl.abort();
     });
+    if (copyBtn) copyBtn.addEventListener("click", function () {
+      var txt = out.innerText || out.textContent || "";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { toast("Report copied"); },
+          function () { toast("Copy failed"); });
+      } else { toast("Copy not supported here"); }
+    });
+    if (regenBtn) regenBtn.addEventListener("click", function () {
+      try { sessionStorage.removeItem(cacheKey); } catch (e) {}
+      run();
+    });
+
+    /* auto-run (default on): cached report renders instantly, otherwise
+     * generation starts just after the results paint */
+    if (prefs.aiAuto !== false && prefs.aiKey) {
+      var cached = cacheGet();
+      if (cached && cached.t) {
+        renderReport(cached.t);
+        renderFups(cached.f || []);
+        setIdle(true);
+      } else {
+        setTimeout(function () { if (!aiGo.disabled) run(); }, 400);
+      }
+    }
   }
 })();
