@@ -1783,24 +1783,85 @@ body.k-light .k-set-win { background: rgba(255, 252, 244, 0.94); }
   .k-ai-out { max-height: 260px; }
 }
 
+/* ---- phones: every pixel of the sticky header is fought for. Compact
+   brand, 46px touch bar, slimmer chips, scroll-affordance fades on the
+   tab strip — the first result lands roughly 300px down instead of 430 ---- */
 @media (max-width: 760px) {
-  .k-hdr { padding: 10px 12px; grid-template-columns: minmax(0, 1fr); }
-  .k-brand { margin: 0 0 6px; justify-content: center; }
-  .k-brand img { height: 32px; }
+  .k-hdr {
+    padding: 7px 10px;
+    padding-top: calc(7px + env(safe-area-inset-top));
+    grid-template-columns: minmax(0, 1fr);
+  }
+  body.k-scrolled .k-hdr { padding-bottom: 7px; }
+  .k-brand { margin: 0 0 4px; justify-content: center; }
+  .k-brand img { height: 22px; }
   .k-hdr-core { max-width: none; }
   .k-sbar { width: 100%; }
-  .k-srow { height: 50px; padding: 0 16px; }
-  .k-gear { width: 50px; height: 50px; }
-  .k-ac { right: 60px; }
-  .k-imgs { columns: 2 150px; column-gap: 10px; }
-  .k-img { margin-bottom: 10px; }
-  /* filters become ONE horizontally scrollable strip */
-  .k-filters { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; gap: 6px; width: 100%; max-width: 100%; }
+  .k-srow { height: 44px; padding: 0 14px; }
+  .k-gear { width: 44px; height: 44px; }
+  .k-ac { right: 56px; }
+
+  /* tab strip: snap + edge fades — a half-visible tab now reads as
+     "scroll on" instead of "clipped" */
+  .k-hdr .k-cats { margin-top: 6px; }
+  .k-cats {
+    gap: 6px;
+    scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+  .k-cat { height: 32px; padding: 0 12px; font-size: 12.5px; scroll-snap-align: start; }
+
+  .k-filters { gap: 6px; margin-top: 6px; }
+  .k-dd-btn, .k-fbtn { height: 30px; font-size: 12px; padding: 0 11px; }
+  .k-dd-cur { max-width: 130px; }
+
+  /* AI band: same content, phone-sized footprint — left-aligned, so the
+     avatar, text and Generate button share rows tightly */
+  .k-ai-band { margin: 10px 10px 0; }
+  .k-ai-band .k-ai { padding: 11px 13px; gap: 9px; justify-content: flex-start; }
+  .k-ai-band .k-ai-ava { width: 34px; height: 34px; }
+  .k-ai-band .k-ai-body { flex-basis: 240px; }
+  .k-ai-head { font-size: 13.5px; }
+  .k-ai-note { font-size: 11.5px; margin: 3px 0 8px; }
+  .k-ai-out { max-height: 240px; }
+
+  /* results */
+  .k-main { padding: 12px 10px 96px; }
+  .k-rs { gap: 10px; }
+  .k-r { padding: 11px 13px 10px; }
+  .k-r-title { font-size: 16px; margin: 7px 0 4px; }
+  .k-r-desc { font-size: 13.5px; }
+
+  /* image masonry: 2 columns, tighter gutters */
+  .k-imgs { columns: 2 150px; column-gap: 8px; }
+  .k-img { margin-bottom: 8px; border-radius: 10px; }
+  .k-img-res, .k-img-src { font-size: 10px; padding: 2px 7px; bottom: 6px; }
+  .k-img-cap { font-size: 10.5px; bottom: 28px; }
+
+  /* videos: YouTube-app layout — thumbnail left, text right */
+  .k-vids { grid-template-columns: 1fr; gap: 10px; }
+  .k-vid { flex-direction: row; align-items: stretch; }
+  .k-vid-thumb { width: 44%; flex: none; aspect-ratio: 16 / 11; }
+  .k-vid-body { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+  .k-vid-title { padding: 10px 11px 3px; font-size: 13.5px; }
+  .k-vid-by { padding: 0 11px 10px; font-size: 11.5px; }
+
+  /* music: 2-up on phones */
+  .k-mus { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+
+  .k-more { margin: 18px auto 4px; font-size: 12px; }
+  .k-extras { margin: 0 10px 16px; }
+  .k-gmap { height: clamp(260px, 44vh, 420px); }
+  .k-nors-img { width: 170px; height: 170px; }
+
+  /* filter strip gets the same scroll-affordance fade as the tabs */
+  .k-filters { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; width: 100%; max-width: 100%;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%); }
   .k-filters::-webkit-scrollbar { display: none; }
   .k-p-row { grid-template-columns: 1fr; gap: 6px; }
-  .k-main { padding: 16px 12px 90px; }
-  .k-extras { margin: 0 12px 20px; }
-  .k-r-title { font-size: 16.5px; }
+  .k-set { padding: 10px; }
   .k-set-body { grid-template-columns: 1fr; }
   .k-set-nav {
     flex-direction: row;
@@ -1810,12 +1871,30 @@ body.k-light .k-set-win { background: rgba(255, 252, 244, 0.94); }
     padding: 10px 12px;
   }
   .k-set-nav button { height: 34px; white-space: nowrap; padding: 0 12px; }
-  .k-set-panes { padding: 14px 16px 18px; }
+  .k-set-panes { padding: 12px 14px 16px; }
 }
 
 @media (max-width: 560px) {
   .k-top { right: 14px; bottom: calc(16px + env(safe-area-inset-bottom)); }
   .k-ac { right: 56px; }
+}
+
+/* ---- touch devices: hover never fires there, so hover-gated info
+   becomes always-on and taps get comfortable ---- */
+@media (hover: none) {
+  body { -webkit-tap-highlight-color: transparent; }
+  a, button, .k-cat, .k-dd-btn, .k-dd-opt, .k-fbtn, .k-gear,
+  .k-top, .k-ai-go, .k-ac-it, .k-x-e { touch-action: manipulation; }
+  /* image tiles: caption + chips live on the tiles permanently */
+  .k-img::after { opacity: 1; }
+  .k-img-res, .k-img-src, .k-img-cap { opacity: 1; }
+  /* finger-friendly menu rows */
+  .k-dd-opt { padding: 11px 12px; }
+  .k-ac-it { padding: 12px 16px; }
+  /* pressed feedback replaces hover feedback */
+  .k-r:active { background: var(--glass); transform: scale(0.99); }
+  .k-vid:active { border-color: var(--line-2); }
+  .k-cat:active { color: var(--gold-2); border-color: var(--line-2); }
 }
 
 /* ==========================================================================
