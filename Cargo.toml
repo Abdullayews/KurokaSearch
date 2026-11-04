@@ -1,6 +1,6 @@
 [package]
 name = "kuroka-search"
-version = "3.9.0"
+version = "3.9.1"
 edition = "2021"
 description = "KurokaSearch — privacy-first metasearch engine, written in Rust"
 license = "AGPL-3.0-or-later"

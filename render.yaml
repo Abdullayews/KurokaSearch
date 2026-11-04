@@ -1,0 +1,16 @@
+# Render Blueprint — KurokaSearch.
+# Deploy: Render Dashboard → New → Blueprint → pick this repo → Apply.
+# Or simply create a Web Service manually with Language = Docker; the
+# Dockerfile in the repo root is picked up automatically.
+services:
+  - type: web
+    name: kurokasearch
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    # optional: residential proxy to unlock Google/Reddit/Deezer from the
+    # datacenter IP — set it in the dashboard instead if it is a secret.
+    # envVars:
+    #   - key: KUROKA_PROXY
+    #     sync: false
