@@ -14,7 +14,16 @@ use std::time::Duration;
 use tiny_http::{Header, Method, Response, Server};
 
 fn main() {
-    let addr = std::env::var("KUROKA_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".into());
+    // Listen address. PaaS order: explicit KUROKA_ADDR wins; otherwise a
+    // PORT env var (Render/Railway/Fly set it, default 10000) binds
+    // 0.0.0.0 so the platform's router can reach us; bare `cargo run`
+    // stays on loopback.
+    let addr = std::env::var("KUROKA_ADDR")
+        .ok().map(|a| a.trim().to_string()).filter(|a| !a.is_empty())
+        .or_else(|| std::env::var("PORT").ok()
+            .and_then(|p| p.trim().parse::<u16>().ok())
+            .map(|p| format!("0.0.0.0:{p}")))
+        .unwrap_or_else(|| "127.0.0.1:3000".into());
     let server = Arc::new(Server::http(&addr)
         .unwrap_or_else(|e| { eprintln!("kuroka: cannot bind {addr}: {e}"); std::process::exit(1); }));
     eprintln!("kuroka {} listening on http://{addr}", engine::VERSION);

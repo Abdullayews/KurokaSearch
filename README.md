@@ -49,7 +49,35 @@ KUROKA_ADDR=127.0.0.1:3000 ./target/release/kuroka-search
 ```
 
 Open `http://127.0.0.1:3000/` — done. Static assets are served from `./static`
-(override with `KUROKA_STATIC=/path/to/static`).
+(override with `KUROKA_STATIC=/path/to/static`). A `PORT` environment
+variable (set by Render, Railway, Fly…) is honored automatically: the server
+then binds `0.0.0.0:$PORT`.
+
+## Deploy on Render (free tier)
+
+1. Push this repo to your GitHub, then in the [Render dashboard](https://dashboard.render.com):
+   **New → Web Service → connect the repo**.
+2. Language: **Docker** — the `Dockerfile` at the repo root builds itself
+   (the release build is capped to a single cargo job so it fits the free
+   tier's 512 MB). Leave the start command empty; the image listens on
+   `0.0.0.0:$PORT` (Render default 10000).
+3. Health check path: `/healthz`.
+4. Optional env vars (dashboard → Environment): `KUROKA_PROXY` with a
+   residential proxy URL to unlock the IP-walled engines (below).
+
+What to expect from a Render deployment: 48 of 51 engines work out of the
+box — cloud IPs are datacenter IPs, and Google Web, Reddit and Deezer wall
+those. The built-in auto-proxy pool recovers Deezer (~20% of public exits
+pass it) and gives Google/Reddit one attempt per wall window; everything
+else (Bing, DuckDuckGo, YouTube, Wikipedia, OpenStreetMap, …) is unaffected.
+A `KUROKA_PROXY` residential exit restores the full 51. Self-hosters on a
+home connection get all engines without any configuration — the wall is a
+datacenter-IP phenomenon.
+
+Free-tier notes: the service sleeps after 15 minutes without traffic and
+wakes in about a minute on the next request; a free pinger such as
+cron-job.org hitting `/healthz` every 10 minutes keeps it warm. The image
+cache directory is ephemeral — it refills after each deploy.
 
 ### Environment
 
