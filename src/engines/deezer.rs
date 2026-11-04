@@ -11,7 +11,8 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let url = format!(
         "https://api.deezer.com/search?q={}&limit=25&index={index}",
         urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10))?;
+    let body = crate::proxypool::get_json_walled(
+        &url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10))?;
     let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
     // Deezer signals errors as {"error": {...}} with HTTP 200
     if let Some(err) = v.get("error") {

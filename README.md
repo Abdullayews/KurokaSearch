@@ -32,10 +32,14 @@ black-and-gold interface.
 \* Google Web: Google serves datacenter IPs a "JavaScript required" shell.
 Behind `KUROKA_PROXY` (any residential exit) the same engine parses real
 results; without a proxy it detects the wall once, remembers it for ten
-minutes and fails in 0 ms — never slowing the page down. Google results are
+minutes and fails in 0 ms — never slowing the page down. The built-in
+**auto-proxy pool** (below) gives every walled engine one extra attempt
+through a live public exit per wall window. On home/residential connections
+Google answers directly and no proxy is involved at all. Google results are
 meanwhile fully live on News (RSS), Videos (YouTube) and Maps (embed).
-Reddit and Deezer are IP-walled in the same way — one toggle in Settings →
-Engines, or `KUROKA_PROXY`, brings them back.
+Reddit and Deezer are IP-walled in the same way — Deezer is measurably
+unlocked by the auto-proxy pool (~20% of public exits pass), while Reddit
+responds to the pool plus one toggle in Settings → Engines.
 
 ## Build & run
 
@@ -54,7 +58,8 @@ Open `http://127.0.0.1:3000/` — done. Static assets are served from `./static`
 | `KUROKA_ADDR` | `127.0.0.1:3000` | Listen address |
 | `KUROKA_STATIC` | `./static` | Static asset directory |
 | `KUROKA_CACHE` | `./cache/img` | Image/favicon proxy cache directory |
-| `KUROKA_PROXY` | — | Route ALL engine traffic through an http/https/socks5 proxy (residential exit unblocks Google, Reddit, Deezer) |
+| `KUROKA_PROXY` | — | Route ALL engine traffic through an http/https/socks5 proxy (a residential exit unblocks Google, Reddit, Deezer). Wins over the auto pool. |
+| `KUROKA_AUTO_PROXY` | `1` | Keyless auto-proxy pool for IP-walled engines (Google Web, Reddit, Deezer): fetches the hourly-rechecked [monosans/proxy-list](https://github.com/monosans/proxy-list) and the 5-minute [proxifly/free-proxy-list](https://github.com/proxifly/free-proxy-list) from GitHub, keeps up to 12 verified live exits, rotates on failure. `0` disables. Only walled engines ever touch it; all traffic is HTTPS, so an exit sees the domain but never the query. |
 
 ## How it works
 

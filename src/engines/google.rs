@@ -6,9 +6,9 @@
 //! page down: a detected JS-wall / captcha is remembered in-process for
 //! ten minutes and every later search fails in 0 ms instead of re-probing.
 //! The moment Google serves real HTML — behind KUROKA_PROXY (residential
-//! exit), from another network, or whenever their wall lifts — the parser
-//! picks it up again. It understands both result formats Google hands to
-//! non-JS clients:
+//! exit), from another network, via the auto-proxy pool, or whenever their
+//! wall lifts — the parser picks it up again. It understands both result
+//! formats Google hands to non-JS clients:
 //!   * classic basic HTML:  <a href="/url?q=…"> + <h3>/BNeawe title blocks
 //!   * modern server-rendered page: <a href="https://…">…<h3>…</h3></a>
 //! Privacy stays intact: Google sees only this server, never the visitor.
@@ -67,11 +67,27 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let body = http_get_browser(&url, "https://www.google.com/", &[], Duration::from_secs(9))?;
 
     // wall detection — remember it so the next search does not re-probe
-    if body.contains("/httpservice/retry/enablejs")
-        || body.contains("Our systems have detected")
-        || body.contains("unusual traffic from your computer network")
-        || body.contains("/sorry/index")
-    {
+    if is_wall(&body) {
+        // one honest attempt through the auto-proxy pool before giving up:
+        // a residential exit in the pool can still serve real results
+        // (measured: rare for Google, common for Deezer; costs nothing on
+        // home connections where direct already works)
+        crate::proxypool::ensure_warm();
+        if let Ok((st, pooled)) = crate::proxypool::fetch_via(
+            &url, USER_AGENT,
+            &[("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+              ("Accept-Language", "en-US,en;q=0.9")],
+            Duration::from_secs(7))
+        {
+            if (200..300).contains(&st) && !is_wall(&pooled) {
+                let mut out = parse_basic(&pooled);
+                if out.is_empty() { out = parse_modern(&pooled); }
+                if !out.is_empty() {
+                    for r in out.iter_mut() { r.meta.push(("engine".into(), "google".into())); }
+                    return Ok(out);
+                }
+            }
+        }
         let mut b = blocked_until().lock().unwrap_or_else(|e| e.into_inner());
         *b = now_epoch() + WALL_TTL;
         return Err("js-walled".into());
@@ -83,6 +99,14 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         r.meta.push(("engine".into(), "google".into()));
     }
     Ok(out)
+}
+
+/// the JS-wall / captcha markers Google serves to filtered sessions
+fn is_wall(body: &str) -> bool {
+    body.contains("/httpservice/retry/enablejs")
+        || body.contains("Our systems have detected")
+        || body.contains("unusual traffic from your computer network")
+        || body.contains("/sorry/index")
 }
 
 /// plain text of the first `class="NEEDLE…"` div after `at`, tags stripped

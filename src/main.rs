@@ -4,6 +4,7 @@
 
 mod engine;
 mod engines;
+mod proxypool;
 mod render;
 
 use std::path::{Component, Path, PathBuf};
@@ -17,6 +18,10 @@ fn main() {
     let server = Arc::new(Server::http(&addr)
         .unwrap_or_else(|e| { eprintln!("kuroka: cannot bind {addr}: {e}"); std::process::exit(1); }));
     eprintln!("kuroka {} listening on http://{addr}", engine::VERSION);
+
+    // auto-proxy pool for IP-walled engines — refreshes quietly in the
+    // background (monosans + proxifly public lists, hourly / 5-min fresh)
+    proxypool::spawn_refresher();
 
     let workers = 8;
     let mut handles = Vec::new();
@@ -48,7 +53,10 @@ fn handle(req: tiny_http::Request) {
 
     match path.as_str() {
         "/" => html(req, 200, render::home_page()),
-        "/healthz" => text(req, 200, "ok"),
+        "/healthz" => {
+            let line = format!("ok · proxy: {}", proxypool::status_line());
+            text(req, 200, &line);
+        }
         // settings live in a popup on home/results now
         "/preferences" => { let _ = redirect(req, "/"); }
         "/search" => {

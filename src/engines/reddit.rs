@@ -13,7 +13,8 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
     let url = format!(
         "https://www.reddit.com/search.json?q={}&limit=25&sort=relevance&t={t}",
         urlencode(&p.query));
-    let body = http_get(&url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10))?;
+    let body = crate::proxypool::get_json_walled(
+        &url, USER_AGENT, &[("Accept", "application/json")], Duration::from_secs(10))?;
     let v: Value = serde_json::from_str(&body).map_err(|e| format!("json: {e}"))?;
     let mut out = Vec::new();
     let children = v.get("data").and_then(|d| d.get("children"))
