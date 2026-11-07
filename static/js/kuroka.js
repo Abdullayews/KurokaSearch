@@ -7,6 +7,26 @@
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
   /* ------------------------------------------------------------------ *
+   * image self-heal: a failed thumb (CDN 429 burst / cool-off window)
+   * is retried three times with backoff before it is given up on. The
+   * /img proxy caches successes, so a healed retry is instant later.
+   * ------------------------------------------------------------------ */
+
+  window.kurokaImgErr = function (img) {
+    var r = +(img.dataset.r || 0);
+    var a = img.closest ? img.closest(".k-img") : null;
+    if (!a) return;
+    if (r >= 3) { a.classList.add("k-img-dead"); return; }
+    img.dataset.r = String(r + 1);
+    if (!img.dataset.base) img.dataset.base = img.src;
+    var delays = [12000, 40000, 90000];
+    var delay = delays[r] + Math.floor(Math.random() * 8000);
+    setTimeout(function () {
+      img.src = img.dataset.base + (img.dataset.base.indexOf("?") > -1 ? "&" : "?") + "retry=" + (r + 1);
+    }, delay);
+  };
+
+  /* ------------------------------------------------------------------ *
    * preferences (localStorage only — nothing leaves the browser)
    * ------------------------------------------------------------------ */
 

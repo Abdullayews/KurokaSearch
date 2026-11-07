@@ -32,7 +32,7 @@ fn main() {
     // background (monosans + proxifly public lists, hourly / 5-min fresh)
     proxypool::spawn_refresher();
 
-    let workers = 8;
+    let workers = 24;
     let mut handles = Vec::new();
     for _ in 0..workers {
         let srv = server.clone();
@@ -294,7 +294,7 @@ const CACHE_TTL: u64 = 24 * 3600;
 /// global cap just spreads the load across hosts.)
 fn with_img_permit<R>(f: impl FnOnce() -> R) -> R {
     static GATE: std::sync::OnceLock<(std::sync::Mutex<u32>, std::sync::Condvar)> = std::sync::OnceLock::new();
-    let gate = GATE.get_or_init(|| (std::sync::Mutex::new(6u32), std::sync::Condvar::new()));
+    let gate = GATE.get_or_init(|| (std::sync::Mutex::new(8u32), std::sync::Condvar::new()));
     let mut permits = gate.0.lock().unwrap_or_else(|p| p.into_inner());
     while *permits == 0 {
         permits = gate.1.wait(permits).unwrap_or_else(|p| p.into_inner());
@@ -325,6 +325,60 @@ fn url_host(u: &str) -> String {
         .split('/').next().unwrap_or("").to_ascii_lowercase()
 }
 
+/// Minimum spacing between requests to the SAME image host: strict CDNs
+/// (Wikimedia & friends) 429 datacenter IPs that sustain faster rates.
+fn host_pace(host: &str) {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    let min_gap = if host == "wikimedia.org" || host.ends_with(".wikimedia.org") {
+        Duration::from_millis(600) // ~1.7 req/s — under the CDN limit
+    } else {
+        Duration::from_millis(350)
+    };
+    loop {
+        let now = Instant::now();
+        let map = LAST.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut m = map.lock().unwrap_or_else(|p| p.into_inner());
+        let next = m.get(host).copied().map(|t| t + min_gap).unwrap_or(now);
+        if next > now {
+            drop(m);
+            thread::sleep(next - now);
+        } else {
+            m.insert(host.to_string(), now);
+            return;
+        }
+    }
+}
+
+/// Per-host circuit breaker: when a CDN starts rejecting us (403/429
+/// bursts), stop hammering it for a cool-off window instead of burning
+/// permit slots and retry sleeps on doomed requests.
+fn breaker(host: &str, ok: bool, check_only: bool) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    struct St { fails: u32, until: Option<Instant> }
+    static MAP: OnceLock<Mutex<HashMap<String, St>>> = OnceLock::new();
+    let map = MAP.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut m = map.lock().unwrap_or_else(|p| p.into_inner());
+    let st = m.entry(host.to_string()).or_insert(St { fails: 0, until: None });
+    if check_only {
+        return !st.until.map(|t| t > Instant::now()).unwrap_or(false);
+    }
+    if ok {
+        st.fails = 0; st.until = None;
+    } else {
+        st.fails += 1;
+        if st.fails >= 5 {
+            st.until = Some(Instant::now() + Duration::from_secs(45));
+            st.fails = 0; // window starts fresh after cool-off
+        }
+    }
+    true
+}
+
 fn fetch_image_cached(u: &str) -> Result<(String, Vec<u8>), String> {
     let dir = cache_dir();
     let key = format!("{:016x}", hash64(u));
@@ -344,7 +398,11 @@ fn fetch_image_cached(u: &str) -> Result<(String, Vec<u8>), String> {
     }
 
     let host = url_host(u);
+    if !breaker(&host, true, true) {
+        return Err("host cooling down (recent failures)".into());
+    }
     let _host_lock = host_gate(&host).lock().unwrap_or_else(|p| p.into_inner());
+    host_pace(&host);
     let fetched = with_img_permit(|| {
         let headers: &[(&str, &str)] = &[("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")];
         // Wikimedia CDNs 403/429 generic browser UAs from datacenter IPs but
@@ -365,10 +423,15 @@ fn fetch_image_cached(u: &str) -> Result<(String, Vec<u8>), String> {
             engine::http_get_binary(u, retry_ua, headers, Duration::from_secs(10))
         }
     });
-    let (ctype, bytes) = fetched?;
+    let (ctype, bytes) = match fetched {
+        Ok(v) => v,
+        Err(e) => { breaker(&host, false, false); return Err(e); }
+    };
     if !ctype.starts_with("image/") || bytes.is_empty() {
+        breaker(&host, false, false);
         return Err(format!("not an image ({ctype})"));
     }
+    breaker(&host, true, false);
     // store (best effort)
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::write(&meta_p, &ctype);

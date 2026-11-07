@@ -553,9 +553,14 @@ pub fn http_get_binary(url: &str, ua: &str, extra: &[(&str, &str)], timeout: Dur
     for (k, v) in extra { rb = rb.header(*k, *v); }
     match rb.send() {
         Ok(resp) => {
+            let status = resp.status().as_u16();
             let ctype = resp.headers().get("content-type")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("application/octet-stream").to_string();
+            if !(200..300).contains(&status) {
+                let _ = resp.bytes();
+                return Err(format!("HTTP {status} ({ctype})"));
+            }
             match resp.bytes() {
                 Ok(b) if b.len() <= 15 * 1024 * 1024 => Ok((ctype, b.to_vec())),
                 Ok(_) => Err("payload too large".into()),

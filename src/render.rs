@@ -463,20 +463,16 @@ fn image_grid(rs: &[SearchResult]) -> String {
             (Some(w), Some(h)) => format!("{w}×{h}"),
             _ => String::new(),
         };
-        // a known aspect-ratio reserves the tile's height BEFORE the lazy
-        // image arrives — without it the grid collapses, the scroll sentinel
-        // fires early and infinite scroll burns through all pages unseen
-        let ar = match (r.width, r.height) {
-            (Some(w), Some(h)) if w > 0 && h > 0 => format!(" style=\"aspect-ratio:{w}/{h}\""),
-            _ => String::new(),
-        };
+        // tile height is reserved by the uniform CSS aspect-ratio on .k-img
+        // (a collapsed grid would make the scroll sentinel fire early and
+        // infinite scroll burn through all pages unseen)
         let mut lic = String::new();
         for (k, v) in &r.meta {
             if k == "license" { lic = v.clone(); }
         }
         let title_attr = esc(&r.title);
-        o.push_str(&format!(r#"<a class="k-img" href="{}" rel="noopener noreferrer" target="_blank"{ar}>
-  <img src="{thumb}" loading="lazy" alt="{}" onerror="this.closest('.k-img').classList.add('k-img-dead')">
+        o.push_str(&format!(r#"<a class="k-img" href="{}" rel="noopener noreferrer" target="_blank">
+  <img src="{thumb}" loading="lazy" alt="{}" onerror="if(window.kurokaImgErr)kurokaImgErr(this);else this.closest('.k-img').classList.add('k-img-dead')">
   <span class="k-img-cap">{}</span>
   <span class="k-img-res">{res}</span>
   <span class="k-img-src">{}{lic_s}</span>

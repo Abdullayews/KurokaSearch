@@ -28,7 +28,13 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
         };
         let page_url = ii.get("descriptionurl").and_then(|x| x.as_str()).unwrap_or("").to_string();
         let full = ii.get("url").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let thumb = ii.get("thumburl").and_then(|x| x.as_str()).unwrap_or(&full).to_string();
+        let thumb = match ii.get("thumburl").and_then(|x| x.as_str()) {
+            Some(t) => t.split('?').next().unwrap_or(t).to_string(),
+            None => match synth_thumb(&full) {
+                Some(t) => t,
+                None => continue,
+            },
+        };
         // drop API-appended utm markers — the CDN serves an HTML page for them
         let full = full.split('?').next().unwrap_or(&full).to_string();
         let thumb = thumb.split('?').next().unwrap_or(&thumb).to_string();
@@ -52,4 +58,22 @@ pub fn search(p: &SearchParams) -> Result<Vec<SearchResult>, String> {
 fn v_license(ii: &Value) -> Option<String> {
     let s = ii.pointer("/extmetadata/LicenseShortName/value")?.as_str()?.to_string();
     Some(clip(&s, 24))
+}
+
+/// upload.wikimedia.org/wikipedia/commons/a/ab/File.jpg
+///   -> thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/File.jpg/640px-File.jpg
+fn synth_thumb(full: &str) -> Option<String> {
+    let rest = full.strip_prefix("https://upload.wikimedia.org/wikipedia/")?;
+    let mut parts = rest.split('/');
+    let proj = parts.next()?;
+    let p1 = parts.next()?;
+    let p2 = parts.next()?;
+    let name = parts.next()?;
+    if parts.next().is_some() || proj.is_empty() || p1.len() != 1 || p2.len() != 2 || name.is_empty() {
+        return None;
+    }
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp") { return None; }
+    Some(format!("https://thumb.wikimedia.org/wikipedia/{proj}/thumb/{p1}/{p2}/{}/640px-{name}",
+        urlencode(name)))
 }
